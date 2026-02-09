@@ -369,16 +369,18 @@ async def duty_pick_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MIDNIGHT RESET
 # ====================================
 
-async def midnight_reset(context: ContextTypes.DEFAULT_TYPE):
-    today = datetime.date.today().isoformat()
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE status SET state='PRESENT' WHERE state='OFF'")
-    c.execute("UPDATE status SET state='PRESENT' WHERE state='LEAVE' AND end_date < ?", (today,))
-    conn.commit()
-    conn.close()
-    for admin in ADMIN_IDS:
-        await context.bot.send_message(chat_id=admin, text="✅ Midnight parade reset complete.")
+async def schedule_midnight_reset(app):
+    while True:
+        now = datetime.datetime.now()
+        # calculate next midnight
+        next_midnight = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time())
+        wait_seconds = (next_midnight - now).total_seconds()
+        await asyncio.sleep(wait_seconds)
+        # create a fake Context with bot
+        class FakeContext:
+            def __init__(self, bot):
+                self.bot = bot
+        await midnight_reset(FakeContext(app.bot))
 
 # ====================================
 # MAIN
@@ -387,7 +389,8 @@ async def midnight_reset(context: ContextTypes.DEFAULT_TYPE):
 async def main():
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
+    
+    # Registration handler
     reg_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -402,15 +405,19 @@ async def main():
         },
         fallbacks=[]
     )
-
+    
     app.add_handler(reg_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
-
-    # Schedule midnight reset
-    app.job_queue.run_daily(midnight_reset, time=datetime.time(hour=0, minute=0))
-
+    
+    # start the midnight reset loop
+    asyncio.create_task(schedule_midnight_reset(app))
+    
     print("Bot running...")
     await app.run_polling()
+
+# ======================
+# RUN
+# ======================
 
 if __name__ == "__main__":
     asyncio.run(main())
