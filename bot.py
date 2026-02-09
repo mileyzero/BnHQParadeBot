@@ -362,8 +362,7 @@ async def strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for rank, _, _ in users:
         count[rank] = count.get(rank, 0) + 1
     await update.message.reply_text(
-        "📊 STRENGTH\n\n" + "\n".join(f"{r}: {c}" for r, c in count.items()
-    )
+        "📊 STRENGTH\n\n" + "\n".join(f"{r}: {c}" for r, c in count.items()))
 
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
