@@ -436,7 +436,10 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
 
     # Job for auto midnight reset
-    app.job_queue.run_daily(midnight_reset, time=datetime.time(hour=0, minute=0))
+    async def schedule_jobs(app):
+        app.job_queue.run_daily(midnight_reset, time=datetime.time(hour=0, minute=0))
+        
+    app.post_init.append(schedule_jobs)
 
     print("Bot running...")
     app.run_polling()
