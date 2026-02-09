@@ -29,7 +29,7 @@ if not BOT_TOKEN:
 ADMIN_IDS = [483448454]
 DB_NAME = "parade.db"
 
-ASK_RANK, ASK_NAME = range(2)
+ASK_RANK, ASK_NAME, ASK_OFFS, ASK_LEAVES, LEAVE_START, LEAVE_END = range(6)
 
 RANKS = [
     "REC", "PTE", "LCP", "CPL", "CFC",
@@ -46,15 +46,19 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
+    # users table with off/leave counters
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
         rank TEXT,
         name TEXT,
-        registered_at TEXT
+        registered_at TEXT,
+        off_counter REAL DEFAULT 0,
+        leave_counter INTEGER DEFAULT 0
     )
     """)
 
+    # status table
     c.execute("""
     CREATE TABLE IF NOT EXISTS status (
         telegram_id INTEGER PRIMARY KEY,
@@ -65,8 +69,20 @@ def init_db():
     )
     """)
 
+    # leaves table to store applied leave dates
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS leaves (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER,
+        start_date TEXT,
+        end_date TEXT,
+        created_at TEXT
+    )
+    """)
+
     conn.commit()
     conn.close()
+
 
 def get_user(user_id):
     conn = sqlite3.connect(DB_NAME)
@@ -76,15 +92,18 @@ def get_user(user_id):
     conn.close()
     return row
 
-def save_user(user_id, rank, name):
+
+def save_user(user_id, rank, name, off_counter=0.0, leave_counter=0):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
         INSERT OR REPLACE INTO users
-        VALUES (?, ?, ?, ?)
-    """, (user_id, rank, name, datetime.datetime.now().isoformat()))
+        (telegram_id, rank, name, registered_at, off_counter, leave_counter)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (user_id, rank, name, datetime.datetime.now().isoformat(), off_counter, leave_counter))
     conn.commit()
     conn.close()
+
 
 def set_status(user_id, state, start_date=None, end_date=None):
     conn = sqlite3.connect(DB_NAME)
@@ -102,17 +121,53 @@ def set_status(user_id, state, start_date=None, end_date=None):
     conn.commit()
     conn.close()
 
+
 def get_all_users():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
-        SELECT users.rank, users.name, status.state
+        SELECT users.rank, users.name, users.off_counter, users.leave_counter, status.state
         FROM users
         LEFT JOIN status ON users.telegram_id = status.telegram_id
     """)
     rows = c.fetchall()
     conn.close()
     return rows
+
+
+def add_leave(user_id, start_date, end_date):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO leaves (telegram_id, start_date, end_date, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, start_date, end_date, datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    # increment leave counter
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE users SET leave_counter = leave_counter + 1 WHERE telegram_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def increment_off(user_id, date):
+    # Friday 0.5, Saturday 1.5, Sunday 1
+    weekday = date.weekday()
+    add = 0
+    if weekday == 4:  # Friday
+        add = 0.5
+    elif weekday == 5:  # Saturday
+        add = 1.5
+    elif weekday == 6:  # Sunday
+        add = 1
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (add, user_id))
+    conn.commit()
+    conn.close()
+
 
 # ====================================
 # MENUS
@@ -127,6 +182,7 @@ def user_menu():
         resize_keyboard=True
     )
 
+
 def admin_menu():
     return ReplyKeyboardMarkup(
         [
@@ -138,8 +194,10 @@ def admin_menu():
         resize_keyboard=True
     )
 
+
 def is_admin(user_id):
     return user_id in ADMIN_IDS
+
 
 # ====================================
 # REGISTRATION
@@ -147,18 +205,14 @@ def is_admin(user_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
     if get_user(user_id):
         menu = admin_menu() if is_admin(user_id) else user_menu()
-        await update.message.reply_text(
-            "Welcome back! Choose an option below 👇",
-            reply_markup=menu
-        )
+        await update.message.reply_text("Welcome back! 👇", reply_markup=menu)
         return ConversationHandler.END
 
     await update.message.reply_text(
-        "👋 Welcome to the Bn HQ Parade Bot!\n\n"
-        "This bot tracks parade state and personnel availability.\n"
+        "👋 Welcome to the Bn HQ Parade Bot!\n"
+        "Track your offs, leaves, and parade state.\n"
         "Let's register you first."
     )
 
@@ -169,6 +223,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ASK_RANK
 
+
 async def select_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -176,21 +231,53 @@ async def select_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("Enter your name:")
     return ASK_NAME
 
+
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     name = update.message.text.upper()
     rank = context.user_data["rank"]
 
-    save_user(user_id, rank, name)
+    # Ask user how many offs they have
+    await update.message.reply_text("Enter how many OFFs you already have (e.g., 0, 1.5):")
+    context.user_data["reg_name"] = name
+    context.user_data["reg_rank"] = rank
+    return ASK_OFFS
+
+
+async def get_offs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        offs = float(update.message.text)
+    except:
+        await update.message.reply_text("Please enter a valid number for OFFs.")
+        return ASK_OFFS
+    context.user_data["offs"] = offs
+    await update.message.reply_text("Enter how many LEAVEs you already have (e.g., 0,1,2):")
+    return ASK_LEAVES
+
+
+async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        leaves = int(update.message.text)
+    except:
+        await update.message.reply_text("Please enter a valid number for LEAVEs.")
+        return ASK_LEAVES
+
+    name = context.user_data["reg_name"]
+    rank = context.user_data["reg_rank"]
+    offs = context.user_data["offs"]
+
+    save_user(user_id, rank, name, offs, leaves)
     set_status(user_id, "PRESENT")
 
     menu = admin_menu() if is_admin(user_id) else user_menu()
-
     await update.message.reply_text(
-        f"✅ Registration complete\n\n{rank} {name}\nStatus: PRESENT",
+        f"✅ Registration complete!\n{rank} {name}\nStatus: PRESENT\nOFFs: {offs}, LEAVEs: {leaves}",
         reply_markup=menu
     )
     return ConversationHandler.END
+
 
 # ====================================
 # BUTTON HANDLER
@@ -199,7 +286,7 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
-    today = datetime.date.today().isoformat()
+    today = datetime.date.today()
 
     if not get_user(user_id):
         await update.message.reply_text("Please register with /start first.")
@@ -210,12 +297,15 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🟢 Marked PRESENT.")
 
     elif text == "🟡 Off":
-        set_status(user_id, "OFF", today, today)
-        await update.message.reply_text("🟡 Marked OFF.")
+        set_status(user_id, "OFF", today.isoformat(), today.isoformat())
+        increment_off(user_id, today)
+        await update.message.reply_text("🟡 Marked OFF. Counter updated based on day.")
 
     elif text == "🔵 Leave":
-        set_status(user_id, "LEAVE", today, None)
-        await update.message.reply_text("🔵 Marked LEAVE.")
+        await update.message.reply_text(
+            "Enter start date of leave (YYYY-MM-DD):"
+        )
+        return LEAVE_START
 
     elif text == "📌 My Status":
         await status(update, context)
@@ -235,15 +325,45 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif is_admin(user_id) and text == "📤 Export CSV":
         await export_csv(update, context)
 
+    return ConversationHandler.END
+
+
 # ====================================
-# COMMANDS (BACKUP)
+# LEAVE HANDLER
+# ====================================
+
+async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["leave_start"] = update.message.text
+    await update.message.reply_text("Enter end date of leave (YYYY-MM-DD):")
+    return LEAVE_END
+
+
+async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    start = context.user_data["leave_start"]
+    end = update.message.text
+    try:
+        datetime.datetime.strptime(start, "%Y-%m-%d")
+        datetime.datetime.strptime(end, "%Y-%m-%d")
+    except:
+        await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
+        return LEAVE_START
+
+    add_leave(user_id, start, end)
+    set_status(user_id, "LEAVE", start, end)
+    await update.message.reply_text(f"🔵 Leave applied: {start} to {end}")
+    return ConversationHandler.END
+
+
+# ====================================
+# COMMANDS
 # ====================================
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Use the buttons below to update your status.\n"
-        "Admins have additional controls."
+        "Use buttons to mark Present, Off, or Leave.\nAdmins have extra commands."
     )
+
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_NAME)
@@ -253,46 +373,52 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     await update.message.reply_text(f"📌 Status: {row[0] if row else 'PRESENT'}")
 
+
 async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    users = get_all_users()
-    present, off, leave = [], [], []
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        SELECT users.rank, users.name, users.off_counter, users.leave_counter, status.state
+        FROM users
+        LEFT JOIN status ON users.telegram_id = status.telegram_id
+    """)
+    users = c.fetchall()
 
-    for rank, name, state in users:
-        entry = f"{rank} {name}"
+    text = "📋 PARADE STATE\n\n"
+    for rank, name, off_counter, leave_counter, state in users:
+        leave_text = f"LEAVEs: {leave_counter}"
         if state == "OFF":
-            off.append(entry)
+            text += f"🟡 {rank} {name} - OFFs: {off_counter}\n"
         elif state == "LEAVE":
-            leave.append(entry)
+            text += f"🔵 {rank} {name} - {leave_text}\n"
         else:
-            present.append(entry)
+            text += f"🟢 {rank} {name}\n"
+    await update.message.reply_text(text)
 
-    await update.message.reply_text(
-        f"📋 PARADE STATE\n\n"
-        f"PRESENT ({len(present)}):\n" + "\n".join(present) + "\n\n"
-        f"OFF ({len(off)}):\n" + "\n".join(off) + "\n\n"
-        f"LEAVE ({len(leave)}):\n" + "\n".join(leave)
-    )
 
 async def strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
     count = {}
-    for rank, _, _ in users:
+    for rank, _, _, _, _ in users:
         count[rank] = count.get(rank, 0) + 1
     text = "📊 STRENGTH\n\n" + "\n".join(f"{r}: {c}" for r, c in count.items())
     await update.message.reply_text(text)
+
 
 async def reset_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(DB_NAME)
     init_db()
     await update.message.reply_text("🔄 Parade reset.")
 
+
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
     with open("parade.csv", "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["Rank", "Name", "Status"])
+        writer.writerow(["Rank", "Name", "OFFs", "LEAVEs", "Status"])
         writer.writerows(users)
     await update.message.reply_document(open("parade.csv", "rb"))
+
 
 # ====================================
 # MAIN
@@ -302,20 +428,26 @@ def main():
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             ASK_RANK: [CallbackQueryHandler(select_rank)],
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
+            ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
+            LEAVE_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_start)],
+            LEAVE_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_end)],
         },
         fallbacks=[]
-    ))
+    )
 
+    app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
     app.add_handler(CommandHandler("help", help_command))
 
     print("Bot running...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
