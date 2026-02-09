@@ -166,7 +166,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ASK_RANK
     
-asyn def select_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def select_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["rank"] = query.data
