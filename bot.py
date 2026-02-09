@@ -100,7 +100,6 @@ def get_user(user_id):
     return row
 
 def save_user(user_id, rank, name, off_balance, leave_balance):
-    # FIXED: replaced `leave_quota` with `leave_balance` typo
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
@@ -252,7 +251,6 @@ async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def get_upcoming_dates(target_weekday):
     today = datetime.date.today()
     dates = []
-    # FIXED: removed double `in` and corrected typo `apped` -> `append`
     for i in range(1, 15):
         d = today + datetime.timedelta(days=i)
         if d.weekday() == target_weekday:
