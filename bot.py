@@ -1,5 +1,3 @@
-can you fix my syntax errors
-
 import os
 import sqlite3
 import datetime
