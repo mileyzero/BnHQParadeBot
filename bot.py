@@ -2,7 +2,6 @@ import os
 import sqlite3
 import datetime
 import csv
-import asyncio
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -26,64 +25,72 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set!")
-
+    
 ADMIN_IDS = [483448454]
-DB_NAME = "parade.db"
+
+DB_NAME = "parade.db"  # SQLite database in Render container
 
 (
-    ASK_RANK,
-    ASK_NAME,
-    ASK_OFFS,
-    ASK_LEAVES,
-    ASK_LEAVE_START,
+    ASK_RANK, 
+    ASK_NAME, 
+    ASK_OFFS, 
+    ASK_LEAVES, 
+    ASK_LEAVE_START, 
     ASK_LEAVE_END,
     ASK_DUTY_DAY,
     ASK_DUTY_DATE
 ) = range(8)
 
-RANKS = ["REC", "PTE", "LCP", "CPL", "CFC",
+RANKS = ["REC", "PTE", "LCP", "CPL", "CFC", 
          "3SG", "2SG", "1SG", "SSG", "MSG",
-         "3WO", "2WO", "1WO", "MWO", "SWO",
+         "3WO", "2WO", "1WO", "MWO", "SWO", 
          "2LT", "LTA", "CPT", "MAJ", "LTC", "SLTC", "COL"]
 
 DUTY_CREDIT = {"FRIDAY": 0.5, "SATURDAY": 1.5, "SUNDAY": 1.0}
 
 # ====================================
-# DATABASE FUNCTIONS
+# DATABASE
 # ====================================
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+
+    # Users table with off/leave balances
     c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            telegram_id INTEGER PRIMARY KEY,
-            rank TEXT,
-            name TEXT,
-            off_balance REAL DEFAULT 0,
-            leave_balance INTEGER DEFAULT 0,
-            registered_at TEXT
-        )
+    CREATE TABLE IF NOT EXISTS users (
+        telegram_id INTEGER PRIMARY KEY,
+        rank TEXT,
+        name TEXT,
+        off_balance REAL DEFAULT 0,
+        leave_balance INTEGER DEFAULT 0,
+        registered_at TEXT
+    )
     """)
+
+    # Status table
     c.execute("""
-        CREATE TABLE IF NOT EXISTS status (
-            telegram_id INTEGER PRIMARY KEY,
-            state TEXT,
-            start_date TEXT,
-            end_date TEXT,
-            updated_at TEXT
-        )
+    CREATE TABLE IF NOT EXISTS status (
+        telegram_id INTEGER PRIMARY KEY,
+        state TEXT,
+        start_date TEXT,
+        end_date TEXT,
+        updated_at TEXT
+    )
     """)
+
+    # Duties table for tracking duties and credits
     c.execute("""
-        CREATE TABLE IF NOT EXISTS duties (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_id INTEGER,
-            duty_date TEXT,
-            day_type TEXT,
-            credited REAL,
-            created_at TEXT
-        )
+    CREATE TABLE IF NOT EXISTS duties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER,
+        duty_date TEXT,
+        day_type TEXT,
+        credited REAL,
+        created_at TEXT
+    )
     """)
+
     conn.commit()
     conn.close()
 
@@ -129,9 +136,9 @@ def get_all_users():
     conn.close()
     return rows
 
-# ====================================
-# MENU
-# ====================================
+# =============================
+# MENUS
+# =============================
 
 def user_menu():
     return ReplyKeyboardMarkup(
@@ -152,29 +159,31 @@ def admin_menu():
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
-async def require_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def require_registration(update, context):
     if not get_user(update.effective_user.id):
         await update.message.reply_text("❗ You are not registered. Use /start first.")
         return False
     return True
 
-# ====================================
+# =============================
 # REGISTRATION FLOW
-# ====================================
+# =============================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user = get_user(user_id)
-    if user:
+
+    if get_user(user_id):
         menu = admin_menu() if is_admin(user_id) else user_menu()
-        await update.message.reply_text(f"Welcome back! {user[1]} {user[2]}", reply_markup=menu)
+        await update.message.reply_text("Welcome back!", reply_markup=menu)
         return ConversationHandler.END
 
-    await update.message.reply_text(
-        "👋 Welcome to the BN HQ Parade Bot!\n"
-        "This bot tracks parade state & personnel availability.\n"
+    welcome_text = (
+        "👋 Welcome to BN HQ Parade Bot!\n"
+        "Track parade state and personnel availability.\n"
         "You will first register your details."
     )
+    await update.message.reply_text(welcome_text)
+
     keyboard = [[InlineKeyboardButton(r, callback_data=r)] for r in RANKS]
     await update.message.reply_text("Select your rank:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ASK_RANK
@@ -188,29 +197,31 @@ async def select_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = update.message.text.upper()
-    await update.message.reply_text("Enter your current OFF balance:")
+    await update.message.reply_text("Enter your current OFF balance (number):")
     return ASK_OFFS
 
 async def get_offs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["off_balance"] = float(update.message.text)
-    await update.message.reply_text("Enter your current LEAVE balance:")
+    await update.message.reply_text("Enter your current LEAVE balance (integer):")
     return ASK_LEAVES
 
 async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    save_user(user_id,
-              context.user_data["rank"],
-              context.user_data["name"],
-              context.user_data["off_balance"],
-              int(update.message.text))
+    save_user(
+        user_id,
+        context.user_data["rank"],
+        context.user_data["name"],
+        context.user_data["off_balance"],
+        int(update.message.text)
+    )
     set_status(user_id, "PRESENT")
     menu = admin_menu() if is_admin(user_id) else user_menu()
     await update.message.reply_text("✅ Registration complete!", reply_markup=menu)
     return ConversationHandler.END
 
-# ====================================
-# BUTTON HANDLER
-# ====================================
+# =============================
+# USER BUTTON HANDLER
+# =============================
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -240,9 +251,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif is_admin(user_id) and text == "📤 Export PS CSV":
         await export_csv(update, context)
 
-# ====================================
-# LEAVE FLOW
-# ====================================
+# =============================
+# LEAVE DATE PICKER
+# =============================
 
 async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_registration(update, context):
@@ -263,9 +274,9 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔵 Leave recorded.")
     return ConversationHandler.END
 
-# ====================================
+# =============================
 # STATUS / HELP
-# ====================================
+# =============================
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_NAME)
@@ -276,26 +287,34 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📌 Status: {row[0] if row else 'PRESENT'}")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Use the menu buttons to update your status.\nAdmins have parade & strength controls."
+    text = (
+        "Use the menu buttons to update your status.\n"
+        "Admins see extra parade & strength commands."
     )
+    await update.message.reply_text(text)
 
-# ====================================
+# =============================
 # ADMIN COMMANDS
-# ====================================
+# =============================
 
 async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
     present, off, leave_list = [], [], []
+
     for rank, name, state in users:
         entry = f"{rank} {name}"
-        if state == "OFF": off.append(entry)
-        elif state == "LEAVE": leave_list.append(entry)
-        else: present.append(entry)
+        if state == "OFF":
+            off.append(entry)
+        elif state == "LEAVE":
+            leave_list.append(entry)
+        else:
+            present.append(entry)
+
     await update.message.reply_text(
-        f"📋 PARADE STATE\n\nPRESENT ({len(present)}):\n" + "\n".join(present) +
-        f"\n\nOFF ({len(off)}):\n" + "\n".join(off) +
-        f"\n\nLEAVE ({len(leave_list)}):\n" + "\n".join(leave_list)
+        f"📋 PARADE STATE\n\n"
+        f"PRESENT ({len(present)}):\n" + "\n".join(present) + "\n\n"
+        f"OFF ({len(off)}):\n" + "\n".join(off) + "\n\n"
+        f"LEAVE ({len(leave_list)}):\n" + "\n".join(leave_list)
     )
 
 async def strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -313,9 +332,9 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         writer.writerows(users)
     await update.message.reply_document(open("parade.csv", "rb"))
 
-# ====================================
-# DUTY ENTRY
-# ====================================
+# =============================
+# DUTY ENTRY (FRI/SAT/SUN)
+# =============================
 
 def get_upcoming_dates(target_weekday):
     today = datetime.date.today()
@@ -329,16 +348,19 @@ def get_upcoming_dates(target_weekday):
 async def duty_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_registration(update, context):
         return ConversationHandler.END
+
     keyboard = [[InlineKeyboardButton(d, callback_data=d)] for d in ["FRIDAY", "SATURDAY", "SUNDAY"]]
-    await update.message.reply_text("Select duty dates:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("Select duty day:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ASK_DUTY_DAY
 
 async def duty_pick_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["duty_day"] = query.data
+
     weekday_map = {"FRIDAY": 4, "SATURDAY": 5, "SUNDAY": 6}
     dates = get_upcoming_dates(weekday_map[query.data])
+
     keyboard = [[InlineKeyboardButton(d.isoformat(), callback_data=d.isoformat())] for d in dates]
     await query.edit_message_text("Select the date you did duty:", reply_markup=InlineKeyboardMarkup(keyboard))
     return ASK_DUTY_DATE
@@ -346,10 +368,12 @@ async def duty_pick_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def duty_pick_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     user_id = update.effective_user.id
     duty_date = query.data
     day = context.user_data["duty_day"]
     credit = DUTY_CREDIT[day]
+
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT 1 FROM duties WHERE telegram_id=? AND duty_date=?", (user_id, duty_date))
@@ -357,39 +381,41 @@ async def duty_pick_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⚠️ Duty already recorded for this date.")
         conn.close()
         return ConversationHandler.END
+
     c.execute("INSERT INTO duties (telegram_id, duty_date, day_type, credited, created_at) VALUES (?, ?, ?, ?, ?)",
               (user_id, duty_date, day, credit, datetime.datetime.now().isoformat()))
+
     c.execute("UPDATE users SET off_balance = off_balance + ? WHERE telegram_id=?", (credit, user_id))
     conn.commit()
     conn.close()
-    await query.edit_message_text(f"✅ Duty recorded: {day} ({duty_date}) + {credit} OFF credited")
+
+    await query.edit_message_text(f"✅ Duty recorded: {day} ({duty_date}) ➕ {credit} OFF credited")
     return ConversationHandler.END
 
-# ====================================
+# =============================
 # MIDNIGHT RESET
-# ====================================
+# =============================
 
-async def schedule_midnight_reset(app):
-    while True:
-        now = datetime.datetime.now()
-        # calculate next midnight
-        next_midnight = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time())
-        wait_seconds = (next_midnight - now).total_seconds()
-        await asyncio.sleep(wait_seconds)
-        # create a fake Context with bot
-        class FakeContext:
-            def __init__(self, bot):
-                self.bot = bot
-        await midnight_reset(FakeContext(app.bot))
+async def midnight_reset(context: ContextTypes.DEFAULT_TYPE):
+    today = datetime.date.today().isoformat()
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE status SET state='PRESENT' WHERE state='OFF'")
+    c.execute("UPDATE status SET state='PRESENT' WHERE state='LEAVE' AND end_date < ?", (today,))
+    conn.commit()
+    conn.close()
 
-# ====================================
+    for admin in ADMIN_IDS:
+        await context.bot.send_message(chat_id=admin, text="✅ Midnight parade reset complete.")
+
+# =============================
 # MAIN
-# ====================================
+# =============================
 
-async def main():
+def main():
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
+
     # Registration handler
     reg_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -405,19 +431,15 @@ async def main():
         },
         fallbacks=[]
     )
-    
+
     app.add_handler(reg_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
-    
-    # start the midnight reset loop
-    asyncio.create_task(schedule_midnight_reset(app))
-    
-    print("Bot running...")
-    await app.run_polling()
 
-# ======================
-# RUN
-# ======================
+    # Job for auto midnight reset
+    app.job_queue.run_daily(midnight_reset, time=datetime.time(hour=0, minute=0))
+
+    print("Bot running...")
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
