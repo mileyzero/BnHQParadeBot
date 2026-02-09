@@ -426,7 +426,7 @@ async def duty_pick_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("INSERT INTO duties (telegram_id, duty_date, day_type, credited, created_at) VALUES (?, ?, ?, ?, ?)",
               (user_id, duty_date, day, credit, datetime.datetime.now().isoformat()))
               
-    c.execute("UPDATE users SET off_balance = off_balance + ? WHERE telegram_id=?, (credit, user_id))
+    c.execute("UPDATE users SET off_balance = off_balance + ? WHERE telegram_id=?", (credit, user_id))
     conn.commit()
     conn.close()
     
