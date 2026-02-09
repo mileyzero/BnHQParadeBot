@@ -21,11 +21,14 @@ from telegram.ext import (
 # ====================================
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable not set!")
+    
 ADMIN_IDS = [483448454]
 
-DB_NAME = "parade.db"
+DB_NAME = "parade.db" # SQLite database will be stored in Render container
 
-ASK_RANK, ASK_NAME = range(2)
+ASK_RANK, ASK_NAME
 
 RANKS = ["REC", "PTE", "LCP", "CPL", "CFC", "3SG", "2SG", "1SG", "SSG", "MSG",
          "3WO", "2WO", "1WO", "MWO", "SWO", "2LT", "LTA", "CPT", "MAJ", "LTC", "SLTC", "COL"]
