@@ -468,11 +468,11 @@ def main():
         entry_points=[CommandHandler("start", start)],
         states={
             ASK_RANK: [CallbackQueryHandler(select_rank)],
-            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)]
+            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
             ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
             ASK_LEAVE_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_start)],
-            ASK_LEAVE_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_end)],]
+            ASK_LEAVE_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_end)],
             ASK_DUTY_DAY: [CallbackQueryHandler(duty_pick_day)],
             ASK_DUTY_DATE: [CallbackQueryHandler(duty_pick_date)],
         },
