@@ -477,7 +477,7 @@ def main():
             ASK_DUTY_DATE: [CallbackQueryHandler(duty_pick_date)],
         },
         fallbacks=[]
-    ))
+    )
     
     app.add_handler(reg_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
