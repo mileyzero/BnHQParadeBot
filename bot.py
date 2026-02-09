@@ -25,28 +25,18 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set!")
-    
+
 ADMIN_IDS = [483448454]
+DB_NAME = "parade.db"
 
-DB_NAME = "parade.db"  # SQLite database in Render container
+ASK_RANK, ASK_NAME = range(2)
 
-(
-    ASK_RANK, 
-    ASK_NAME, 
-    ASK_OFFS, 
-    ASK_LEAVES, 
-    ASK_LEAVE_START, 
-    ASK_LEAVE_END,
-    ASK_DUTY_DAY,
-    ASK_DUTY_DATE
-) = range(8)
-
-RANKS = ["REC", "PTE", "LCP", "CPL", "CFC", 
-         "3SG", "2SG", "1SG", "SSG", "MSG",
-         "3WO", "2WO", "1WO", "MWO", "SWO", 
-         "2LT", "LTA", "CPT", "MAJ", "LTC", "SLTC", "COL"]
-
-DUTY_CREDIT = {"FRIDAY": 0.5, "SATURDAY": 1.5, "SUNDAY": 1.0}
+RANKS = [
+    "REC", "PTE", "LCP", "CPL", "CFC",
+    "3SG", "2SG", "1SG", "SSG", "MSG",
+    "3WO", "2WO", "1WO", "MWO", "SWO",
+    "2LT", "LTA", "CPT", "MAJ", "LTC", "SLTC", "COL"
+]
 
 # ====================================
 # DATABASE
@@ -56,19 +46,15 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
-    # Users table with off/leave balances
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
         rank TEXT,
         name TEXT,
-        off_balance REAL DEFAULT 0,
-        leave_balance INTEGER DEFAULT 0,
         registered_at TEXT
     )
     """)
 
-    # Status table
     c.execute("""
     CREATE TABLE IF NOT EXISTS status (
         telegram_id INTEGER PRIMARY KEY,
@@ -76,18 +62,6 @@ def init_db():
         start_date TEXT,
         end_date TEXT,
         updated_at TEXT
-    )
-    """)
-
-    # Duties table for tracking duties and credits
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS duties (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER,
-        duty_date TEXT,
-        day_type TEXT,
-        credited REAL,
-        created_at TEXT
     )
     """)
 
@@ -102,14 +76,13 @@ def get_user(user_id):
     conn.close()
     return row
 
-def save_user(user_id, rank, name, off_balance, leave_balance):
+def save_user(user_id, rank, name):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
         INSERT OR REPLACE INTO users
-        (telegram_id, rank, name, off_balance, leave_balance, registered_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (user_id, rank, name, off_balance, leave_balance, datetime.datetime.now().isoformat()))
+        VALUES (?, ?, ?, ?)
+    """, (user_id, rank, name, datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
 
@@ -118,9 +91,14 @@ def set_status(user_id, state, start_date=None, end_date=None):
     c = conn.cursor()
     c.execute("""
         INSERT OR REPLACE INTO status
-        (telegram_id, state, start_date, end_date, updated_at)
         VALUES (?, ?, ?, ?, ?)
-    """, (user_id, state, start_date, end_date, datetime.datetime.now().isoformat()))
+    """, (
+        user_id,
+        state,
+        start_date,
+        end_date,
+        datetime.datetime.now().isoformat()
+    ))
     conn.commit()
     conn.close()
 
@@ -136,56 +114,59 @@ def get_all_users():
     conn.close()
     return rows
 
-# =============================
+# ====================================
 # MENUS
-# =============================
+# ====================================
 
 def user_menu():
     return ReplyKeyboardMarkup(
-        [["🟢 Present", "🟡 Off", "🔵 Leave"],
-         ["📌 My Status", "❓ Help"]],
+        [
+            ["🟢 Present", "🟡 Off", "🔵 Leave"],
+            ["📌 My Status", "❓ Help"]
+        ],
         resize_keyboard=True
     )
 
 def admin_menu():
     return ReplyKeyboardMarkup(
-        [["🟢 Present", "🟡 Off", "🔵 Leave"],
-         ["📌 My Status", "❓ Help"],
-         ["📋 Parade State", "📊 Strength"],
-         ["📤 Export PS CSV"]],
+        [
+            ["🟢 Present", "🟡 Off", "🔵 Leave"],
+            ["📌 My Status", "❓ Help"],
+            ["📋 Parade State", "📊 Strength"],
+            ["🔄 Reset Parade", "📤 Export CSV"]
+        ],
         resize_keyboard=True
     )
 
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
-async def require_registration(update, context):
-    if not get_user(update.effective_user.id):
-        await update.message.reply_text("❗ You are not registered. Use /start first.")
-        return False
-    return True
-
-# =============================
-# REGISTRATION FLOW
-# =============================
+# ====================================
+# REGISTRATION
+# ====================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if get_user(user_id):
         menu = admin_menu() if is_admin(user_id) else user_menu()
-        await update.message.reply_text("Welcome back!", reply_markup=menu)
+        await update.message.reply_text(
+            "Welcome back! Choose an option below 👇",
+            reply_markup=menu
+        )
         return ConversationHandler.END
 
-    welcome_text = (
-        "👋 Welcome to BN HQ Parade Bot!\n"
-        "Track parade state and personnel availability.\n"
-        "You will first register your details."
+    await update.message.reply_text(
+        "👋 Welcome to the Bn HQ Parade Bot!\n\n"
+        "This bot tracks parade state and personnel availability.\n"
+        "Let's register you first."
     )
-    await update.message.reply_text(welcome_text)
 
     keyboard = [[InlineKeyboardButton(r, callback_data=r)] for r in RANKS]
-    await update.message.reply_text("Select your rank:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        "Select your rank:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ASK_RANK
 
 async def select_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -196,32 +177,24 @@ async def select_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_NAME
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["name"] = update.message.text.upper()
-    await update.message.reply_text("Enter your current OFF balance (number):")
-    return ASK_OFFS
-
-async def get_offs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["off_balance"] = float(update.message.text)
-    await update.message.reply_text("Enter your current LEAVE balance (integer):")
-    return ASK_LEAVES
-
-async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    save_user(
-        user_id,
-        context.user_data["rank"],
-        context.user_data["name"],
-        context.user_data["off_balance"],
-        int(update.message.text)
-    )
+    name = update.message.text.upper()
+    rank = context.user_data["rank"]
+
+    save_user(user_id, rank, name)
     set_status(user_id, "PRESENT")
+
     menu = admin_menu() if is_admin(user_id) else user_menu()
-    await update.message.reply_text("✅ Registration complete!", reply_markup=menu)
+
+    await update.message.reply_text(
+        f"✅ Registration complete\n\n{rank} {name}\nStatus: PRESENT",
+        reply_markup=menu
+    )
     return ConversationHandler.END
 
-# =============================
-# USER BUTTON HANDLER
-# =============================
+# ====================================
+# BUTTON HANDLER
+# ====================================
 
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -229,54 +202,48 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = datetime.date.today().isoformat()
 
     if not get_user(user_id):
-        await update.message.reply_text("Please register using /start.")
+        await update.message.reply_text("Please register with /start first.")
         return
 
     if text == "🟢 Present":
         set_status(user_id, "PRESENT")
         await update.message.reply_text("🟢 Marked PRESENT.")
+
     elif text == "🟡 Off":
         set_status(user_id, "OFF", today, today)
         await update.message.reply_text("🟡 Marked OFF.")
+
     elif text == "🔵 Leave":
-        await leave(update, context)
+        set_status(user_id, "LEAVE", today, None)
+        await update.message.reply_text("🔵 Marked LEAVE.")
+
     elif text == "📌 My Status":
         await status(update, context)
+
     elif text == "❓ Help":
         await help_command(update, context)
+
     elif is_admin(user_id) and text == "📋 Parade State":
         await parade(update, context)
+
     elif is_admin(user_id) and text == "📊 Strength":
         await strength(update, context)
-    elif is_admin(user_id) and text == "📤 Export PS CSV":
+
+    elif is_admin(user_id) and text == "🔄 Reset Parade":
+        await reset_db(update, context)
+
+    elif is_admin(user_id) and text == "📤 Export CSV":
         await export_csv(update, context)
 
-# =============================
-# LEAVE DATE PICKER
-# =============================
+# ====================================
+# COMMANDS (BACKUP)
+# ====================================
 
-async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await require_registration(update, context):
-        return ConversationHandler.END
-    await update.message.reply_text("Enter LEAVE start date (YYYY-MM-DD):")
-    return ASK_LEAVE_START
-
-async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["leave_start"] = update.message.text
-    await update.message.reply_text("Enter LEAVE end date (YYYY-MM-DD):")
-    return ASK_LEAVE_END
-
-async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    start = context.user_data["leave_start"]
-    end = update.message.text
-    set_status(user_id, "LEAVE", start, end)
-    await update.message.reply_text("🔵 Leave recorded.")
-    return ConversationHandler.END
-
-# =============================
-# STATUS / HELP
-# =============================
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Use the buttons below to update your status.\n"
+        "Admins have additional controls."
+    )
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_NAME)
@@ -286,27 +253,16 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     await update.message.reply_text(f"📌 Status: {row[0] if row else 'PRESENT'}")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "Use the menu buttons to update your status.\n"
-        "Admins see extra parade & strength commands."
-    )
-    await update.message.reply_text(text)
-
-# =============================
-# ADMIN COMMANDS
-# =============================
-
 async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
-    present, off, leave_list = [], [], []
+    present, off, leave = [], [], []
 
     for rank, name, state in users:
         entry = f"{rank} {name}"
         if state == "OFF":
             off.append(entry)
         elif state == "LEAVE":
-            leave_list.append(entry)
+            leave.append(entry)
         else:
             present.append(entry)
 
@@ -314,7 +270,7 @@ async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 PARADE STATE\n\n"
         f"PRESENT ({len(present)}):\n" + "\n".join(present) + "\n\n"
         f"OFF ({len(off)}):\n" + "\n".join(off) + "\n\n"
-        f"LEAVE ({len(leave_list)}):\n" + "\n".join(leave_list)
+        f"LEAVE ({len(leave)}):\n" + "\n".join(leave)
     )
 
 async def strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -322,7 +278,13 @@ async def strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
     count = {}
     for rank, _, _ in users:
         count[rank] = count.get(rank, 0) + 1
-    await update.message.reply_text("📊 STRENGTH\n\n" + "\n".join(f"{r}: {c}" for r, c in count.items()))
+    text = "📊 STRENGTH\n\n" + "\n".join(f"{r}: {c}" for r, c in count.items())
+    await update.message.reply_text(text)
+
+async def reset_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    os.remove(DB_NAME)
+    init_db()
+    await update.message.reply_text("🔄 Parade reset.")
 
 async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
@@ -332,112 +294,25 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         writer.writerows(users)
     await update.message.reply_document(open("parade.csv", "rb"))
 
-# =============================
-# DUTY ENTRY (FRI/SAT/SUN)
-# =============================
-
-def get_upcoming_dates(target_weekday):
-    today = datetime.date.today()
-    dates = []
-    for i in range(1, 15):
-        d = today + datetime.timedelta(days=i)
-        if d.weekday() == target_weekday:
-            dates.append(d)
-    return dates
-
-async def duty_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await require_registration(update, context):
-        return ConversationHandler.END
-
-    keyboard = [[InlineKeyboardButton(d, callback_data=d)] for d in ["FRIDAY", "SATURDAY", "SUNDAY"]]
-    await update.message.reply_text("Select duty day:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ASK_DUTY_DAY
-
-async def duty_pick_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data["duty_day"] = query.data
-
-    weekday_map = {"FRIDAY": 4, "SATURDAY": 5, "SUNDAY": 6}
-    dates = get_upcoming_dates(weekday_map[query.data])
-
-    keyboard = [[InlineKeyboardButton(d.isoformat(), callback_data=d.isoformat())] for d in dates]
-    await query.edit_message_text("Select the date you did duty:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ASK_DUTY_DATE
-
-async def duty_pick_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = update.effective_user.id
-    duty_date = query.data
-    day = context.user_data["duty_day"]
-    credit = DUTY_CREDIT[day]
-
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM duties WHERE telegram_id=? AND duty_date=?", (user_id, duty_date))
-    if c.fetchone():
-        await query.edit_message_text("⚠️ Duty already recorded for this date.")
-        conn.close()
-        return ConversationHandler.END
-
-    c.execute("INSERT INTO duties (telegram_id, duty_date, day_type, credited, created_at) VALUES (?, ?, ?, ?, ?)",
-              (user_id, duty_date, day, credit, datetime.datetime.now().isoformat()))
-
-    c.execute("UPDATE users SET off_balance = off_balance + ? WHERE telegram_id=?", (credit, user_id))
-    conn.commit()
-    conn.close()
-
-    await query.edit_message_text(f"✅ Duty recorded: {day} ({duty_date}) ➕ {credit} OFF credited")
-    return ConversationHandler.END
-
-# =============================
-# MIDNIGHT RESET
-# =============================
-
-async def midnight_reset(context: ContextTypes.DEFAULT_TYPE):
-    today = datetime.date.today().isoformat()
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE status SET state='PRESENT' WHERE state='OFF'")
-    c.execute("UPDATE status SET state='PRESENT' WHERE state='LEAVE' AND end_date < ?", (today,))
-    conn.commit()
-    conn.close()
-
-    for admin in ADMIN_IDS:
-        await context.bot.send_message(chat_id=admin, text="✅ Midnight parade reset complete.")
-
-# =============================
+# ====================================
 # MAIN
-# =============================
+# ====================================
 
 def main():
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Registration handler
-    reg_handler = ConversationHandler(
+    app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             ASK_RANK: [CallbackQueryHandler(select_rank)],
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
-            ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
-            ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
-            ASK_LEAVE_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_start)],
-            ASK_LEAVE_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_end)],
-            ASK_DUTY_DAY: [CallbackQueryHandler(duty_pick_day)],
-            ASK_DUTY_DATE: [CallbackQueryHandler(duty_pick_date)],
         },
         fallbacks=[]
-    )
+    ))
 
-    app.add_handler(reg_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
-
-    app.initialize()
-    
-    app.job_queue.run_daily(midnight_reset, time=datetime.time(hour=0, minute=0))
+    app.add_handler(CommandHandler("help", help_command))
 
     print("Bot running...")
     app.run_polling()
