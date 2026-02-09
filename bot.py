@@ -454,6 +454,12 @@ async def midnight_reset(context: ContextTypes.DEFAULT_TYPE):
             text="✅ Midnight parade reset complete."
         )
 
+async def setup_jobs(app):
+    app.job_queue.run_daily(
+        midnight_reset,
+        time=datetime.time(hour=0, minute=0)
+    )
+
 # ======================================
 # MAIN
 # ======================================
@@ -481,13 +487,8 @@ def main():
     app.add_handler(reg_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
     
-    app.job_queue.run_daily(
-        midnight_reset,
-        time=datetime.time(hour=0, minute=0)
-    )
-    
     print("Bot running...")
-    app.run_polling()
+    app.run_polling(post_init=setup_jobs)
     
 if __name__ == "__main__":
     main()
