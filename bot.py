@@ -214,10 +214,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_status(user_id, "LEAVE", today, None)
         await update.message.reply_text("🔵 Marked LEAVE.")
         
-    elif text = "📌 My Status":
+    elif text == "📌 My Status":
         await status(update, context)
         
-    elif text = "❓ Help":
+    elif text == "❓ Help":
         await help_command(update, context)
         
     elif is_admin(user_id) and text == "📋 Parade State":
