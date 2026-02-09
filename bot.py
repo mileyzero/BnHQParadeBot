@@ -266,7 +266,7 @@ async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"📋 PARADE STATE\n\n"
         f"PRESENT ({len(present)}):\n" + "\n".join(present) + "\n\n"
-        f"OFF ({len(off}):\n" + "\n".join(off) + "\n\n"
+        f"OFF ({len(off)}):\n" + "\n".join(off) + "\n\n"
         f"LEAVE ({len(leave)}):\n" + "\n".join(leave)
     )
     
