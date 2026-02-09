@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import datetime
 from telegram import (
@@ -19,7 +20,7 @@ from telegram.ext import (
 # CONFIG
 # ====================================
 
-BOT_TOKEN = "8519024988:AAF34RT9sq3-tOIecg32WQPbexyCZwAJRUQ"
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_IDS = [483448454]
 
 DB_NAME = "parade.db"
