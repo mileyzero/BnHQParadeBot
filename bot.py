@@ -240,7 +240,7 @@ async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     menu = admin_menu() if is_admin(user_id) else user_menu()
     await update.message.reply_text(
-        f"✅ Registration complete,"
+        f"✅ Registration complete!",
         reply_markup=menu
     )
     return ConversationHandler.END
