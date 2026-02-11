@@ -1,5 +1,4 @@
 import os
-import asyncio
 import sqlite3
 import datetime
 import csv
@@ -26,10 +25,6 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set!")
-    
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
-if not RENDER_URL:
-    raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
 
 ADMIN_IDS = [483448454]
 DB_NAME = "parade.db"
@@ -47,38 +42,28 @@ RANKS = [
 # DATABASE
 # ====================================
 
-DB_NAME = "parade.db"
-
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
-# ====================================
-# USERS TABLE
-# ====================================
-# Create table with only essential columns first
-
+    # users table with off/leave counters
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
         rank TEXT,
         name TEXT,
-        registered_at TEXT
+        registered_at TEXT,
+        off_counter REAL DEFAULT 0
     )
     """)
-
-    # Ensure 'off_counter' column exists
-    c.execute("PRAGMA table_info(users)")
-    existing_columns = [col[1] for col in c.fetchall()]
     
-    if "off_counter" not in existing_columns:
-        c.execute("ALTER TABLE users ADD COLUMN off_counter REAL DEFAULT 0")
-    if "leave_counter" not in existing_columns:
+    # Add leave_counter if not exists
+    c.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in c.fetchall()]
+    if "leave_counter" not in columns:
         c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
 
-    # =====================================
-    # STATUS TABLE
-    # =====================================
+    # status table
     c.execute("""
     CREATE TABLE IF NOT EXISTS status (
         telegram_id INTEGER PRIMARY KEY,
@@ -89,9 +74,7 @@ def init_db():
     )
     """)
 
-    # =========================================
-    # LEAVES TABLE
-    # =========================================
+    # leaves table to store applied leave dates
     c.execute("""
     CREATE TABLE IF NOT EXISTS leaves (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -479,7 +462,6 @@ app_flask = Flask(__name__)
 
 def main():
     init_db()
-    
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
@@ -507,16 +489,11 @@ def main():
     bot_app.add_handler(conv)
     bot_app.add_handler(leave_conv)
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
+    
     bot_app.add_handler(CommandHandler("help", help_command))
-    
-    # =======================================
-    # FLASK ROUTES
-    # =======================================
-    
-    # Set webhook
-    webhook_url = f"{RENDER_URL}/{BOT_TOKEN}"
-    bot_app.bot.set_webhook(webhook_url)
-    print(f"Webhook set to {webhook_url}")
+
+    bot_app.initialize()
+    bot_app.run_polling()
     
     # Uptime pinger
     @app_flask.get("/")
@@ -525,17 +502,22 @@ def main():
         
     # Webhook route for Telegram
     @app_flask.post(f"/{BOT_TOKEN}")
-    def webhook():
+    async def webhook():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
-        # Run async bot handler
-        asyncio.create_task(bot_app.process_update(update))
+        await bot_app.process_update(update)
         return "ok"
+        
+    # Set webhook
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+    if not RENDER_URL:
+        raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
+    bot_app.bot.set_webhook(f"{RENDER_URL}/{BOT_TOKEN}")
     
-    # Run Flask app
+    # Run Flask
     PORT = int(os.environ.get("PORT", 10000))
-    print(f"Bot running with webhook on port {PORT}...")
     app_flask.run(host="0.0.0.0", port=PORT)
-    
+
+
 if __name__ == "__main__":
     main()
