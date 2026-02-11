@@ -30,7 +30,7 @@ if not BOT_TOKEN:
 ADMIN_IDS = [483448454]
 DB_NAME = "parade.db"
 
-ASK_RANK, ASK_NAME, ASK_OFFS, ASK_LEAVES, LEAVE_START, LEAVE_END, OFF_SELECT = range(7)
+ASK_RANK, ASK_NAME, ASK_OFFS, ASK_LEAVES, LEAVE_START, LEAVE_END, OFF_TYPE, ASK_OFF_DATE = range(8)
 
 RANKS = [
     "REC", "PTE", "LCP", "CPL", "CFC",
@@ -275,33 +275,86 @@ async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====================================
 
 async def off_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("AM OFF (0.5)", callback_data="AM")],
-        [InlineKeyboardButton("PM OFF (0.5)", callback_data="PM")],
-        [InlineKeyboardButton("FULL DAY OFF(1)", callback_data="FULL")]
-    ]
-    await update.message.reply_text("Select OFF type:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return OFF_SELECT
+    await update.message.reply_text(
+        "Select OFF type:",
+        reply_markup=off_options_keyboard()
+    )
+    return OFF_TYPE
     
-async def off_apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def off_type_selected(update: Update, context: ContextTypes.DEFAULT.TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
+    
+    context.user_data["off_type"] = query.data
+    
+    await query.edit_message_text(
+        "Enter OFF date (YYYY-MM-DD):"
+    )
+    
+    return ASK_OFF_DATE
+
+async def off_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    date_text = update.message.text.strip()
+    
+    try:
+        off_date = datetime.datetime.strptime(date_text, "%Y-%m-%d").date()
+    except:
+        await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
+        return ASK_OFF_DATE
+        
     today = datetime.date.today()
     
-    off_map = {"AM":0.5, "PM":0.5, "FULL":1.0}
-    off_amount = off_map.get(query.data, 0)
+    # ❌ Prevent past dates
+    if off_date < today:
+        await update.message.reply_text("❌ You cannot select a past date.")
+        return ASK_OFF_DATE
+        
+    off_type = context.user_data.get("off_type")
     
-    increment_off(user_id, off_amount)
-    set_status(user_id, "OFF", today.isoformat(), today.isoformat())
+    off_map = {
+        "AM" : 0.5,
+        "PM" : 0.5,
+        "FULL" : 1.0
+    }
     
+    off_amount = off_map.get(off_type, 0)
+    
+    # Check remaining OFF balance
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT off_counter FROM users WHERE telegram_id=?", (user_id,))
-    off_total = c.fetchone()[0]
+    remaining_off = c.fetchone()[0]
+    
+    if off_amount > remaining_off:
+        conn.close()
+        await update.message.reply_text(
+            f"❌ You only have {remaining_off} OFF remaining."
+        )
+        return ConversationHandler.END
+        
+    # Deduct OFF
+    c.execute(
+        "UPDATE users SET off_counter = off_counter - ? WHERE telegram_id=?",
+        (off_amount, user_id)
+    )
+    conn.commit()
     conn.close()
     
-    await query.edit_message_text(f"🟡 Marked OFF ({query.data}). Total OFFs: {off_total}")
+    # Update status
+    set_status(user_id, "OFF", date_text, date_text)
+    
+    menu = admin_menu() if is_admin(user_id) else user_menu()
+    
+    await update.message.reply_text(
+        f"🟡 OFF applied on {date_text}\n"
+        f"Type: {off_type}\n"
+        f"Remaining OFFs: {remaining_off - off_amount}",
+        reply_markup=menu
+    )
+    
+    context.user_data.pop("off_type", None)
+    
     return ConversationHandler.END
     
 # ====================================
@@ -331,6 +384,11 @@ async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
         return LEAVE_START
         
+    today = datetime.date.today()
+    if start_date < today:
+        await update.message.reply_text("❌ You cannot select a past date. Please choose today or a future date.")
+        return LEAVE_START
+        
     context.user_data["leave_start"] = start
     await update.message.reply_text("Enter end date of leave (YYYY-MM-DD):")
     return LEAVE_END
@@ -349,6 +407,11 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end_date = datetime.datetime.strptime(end, "%Y-%m-%d").date()
     except:
         await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
+        return LEAVE_END
+        
+    today = datetime.date.today()
+    if end_date < today:
+        await update.message.reply_text("❌ End date cannot be in the past. Choose today or later.")
         return LEAVE_END
         
     if end_date < start_date:
@@ -401,7 +464,7 @@ async def off_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Update OFF counter
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (off_amount, user_id))
+    c.execute("UPDATE users SET off_counter = off_counter - ? WHERE telegram_id=?", (off_amount, user_id))
     conn.commit()
     conn.close()
 
@@ -459,7 +522,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Use buttons to mark Present, Off, or Leave.\nAdmins have extra commands."
     )
-
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -568,7 +630,7 @@ def main():
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
             ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
-            OFF_SELECT: [CallbackQueryHandler(off_apply)],
+            OFF_TYPE: [CallbackQueryHandler(off_apply)],
         },
         fallbacks=[]
     )
@@ -584,11 +646,20 @@ def main():
         fallbacks=[],
     )
     
+    off_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🟡 Off$"), off_selection)],
+        states={
+            OFF_TYPE: [CallbackQueryHandler(off_type_callback, pattern="^(AM|PM|FULL)$")],
+            ASK_OFF_DATE: [MessageHandler(filter.TEXT & ~filters.COMMAND, off_date_input)],
+        },
+        fallbacks=[],
+    )
+    
     bot_app.add_handler(conv)
     bot_app.add_handler(leave_conv)
+    bot_app.add_handler(off_conv)
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
     bot_app.add_handler(CommandHandler("help", help_command))
-    bot_app.add_handler(CallbackQueryHandler(off_type_callback, pattern="^(AM|PM|FULL)$"))
     
     bot_app.initialize()
     bot_app.run_polling()
