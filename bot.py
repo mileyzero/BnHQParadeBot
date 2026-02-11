@@ -529,7 +529,7 @@ def main():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
         # Run async bot handler
-        asyncio.run(bot_app.process_update(update))
+        asyncio.create_task(bot_app.process_update(update))
         return "ok"
     
     # Run Flask app
