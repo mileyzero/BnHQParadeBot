@@ -43,6 +43,8 @@ RANKS = [
 # ====================================
 
 def init_db():
+    print("Running init_db()...")
+    
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
@@ -53,10 +55,20 @@ def init_db():
         rank TEXT,
         name TEXT,
         registered_at TEXT,
-        off_counter REAL DEFAULT 0,
-        leave_counter INTEGER DEFAULT 0
     )
     """)
+    
+    # Add leave_counter if missing 
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
+        
+    # Add off_counter if missing
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN off_counter REAL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
 
     # status table
     c.execute("""
