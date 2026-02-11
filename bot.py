@@ -494,6 +494,7 @@ def main():
     bot_app.add_handler(CommandHandler("help", help_command))
     
     bot_app.initialize()
+    bot_app.run_polling()
     
     # Uptime pinger
     @app_flask.get("/")
