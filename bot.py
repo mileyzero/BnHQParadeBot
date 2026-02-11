@@ -481,11 +481,11 @@ def main():
         fallbacks=[],
     )
     
-    app.add_handler(conv)
-    app.add_handler(leave_conv)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
+    bot_app.add_handler(conv)
+    bot_app.add_handler(leave_conv)
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
     
-    app.add_handler(CommandHandler("help", help_command))
+    bot_app.add_handler(CommandHandler("help", help_command))
 
     bot_app.initialize()
     bot_app.run_polling()
