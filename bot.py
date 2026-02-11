@@ -77,9 +77,15 @@ def init_db():
         state TEXT,
         start_date TEXT,
         end_date TEXT,
-        updated_at TEXT
+        updated_at TEXT,
+        off_type TEXT DEFAULT NULL
     )
     """)
+    
+    try:
+        c.execute("ALTER TABLE status ADD COLUMN off_type TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
 
     # leaves table
     c.execute("""
@@ -114,7 +120,7 @@ def save_user(user_id, rank, name, off_counter=0.0, leave_counter=0):
     conn.commit()
     conn.close()
 
-def set_status(user_id, state, start_date=None, end_date=None):
+def set_status(user_id, state, start_date=None, end_date=None, off_type=None):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
@@ -125,7 +131,8 @@ def set_status(user_id, state, start_date=None, end_date=None):
         state,
         start_date,
         end_date,
-        datetime.datetime.now().isoformat()
+        datetime.datetime.now().isoformat(),
+        off_type
     ))
     conn.commit()
     conn.close()
@@ -164,6 +171,44 @@ def increment_off(user_id, amount):
     conn.commit()
     conn.close()
 
+# ====================================
+# DATE CONFLICT CHECKER
+# ====================================
+
+def check_date_conflict(user_id, new_start: datetime.date, new_end: datetime.date) -> str:
+    """
+    Check if the proposed date range conflicts with existing OFFs or LEAVEs.
+    Returns a message string if there's a conflict, or None if no conflict.
+    """
+    
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
+    # Check existing leaves
+    c.execute("SELECT start_date, end_date FROM leaves WHERE telegram_id=?", (user_id,))
+    leaves = c.fetchall()
+    for leave_start, leave_end in leaves:
+        leave_start_dt = datetime.datetime.strptime(leave_start, "%Y-%m-%d").date()
+        leave_end_dt = datetime.datetime.strptime(leave_end, "%Y-%m-%d").date()
+        # If new range overlaps LEAVE
+        if new_start <= leave_end_dt and new_end >= leave_start_dt:
+            conn.close()
+            return f"❌ Conflict with LEAVE from {leave_start} to {leave_end}."
+    
+    # Check existing offs
+    c.execute("SELECT start_date, end_date FROM leaves WHERE telegram_id=?", (user_id,))
+    leaves = c.fetchall()
+    for off_start, off_end in offs:
+        off_start_dt = datetime.datetime.strptime(off_start, "%Y-%m-%d").date()
+        off_end_dt = datetime.datetime.strptime(off_end, "%Y-%m-%d").date()
+        # If new range overlaps OFF
+        if new_start <= off_end_dt and new_end >= off_start_dt:
+            conn.close()
+            return f"❌ Conflict with OFF on {off_start}."
+    
+    conn.close()
+    return None
+    
 
 # ====================================
 # MENUS
@@ -344,6 +389,12 @@ async def off_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
         
+    # Check conflicts using helper
+    conflict_msg = check_date_conflict(user_id, off_date, off_date)
+    if conflict_msg:
+        await update.message.reply_text(conflict_msg + " Please choose another OFF date.")
+        return ASK_OFF_DATE
+        
     # Deduct OFF
     c.execute(
         "UPDATE users SET off_counter = off_counter - ? WHERE telegram_id=?",
@@ -353,7 +404,7 @@ async def off_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     
     # Update status
-    set_status(user_id, "OFF", date_text, date_text)
+    set_status(user_id, "OFF", date_text, date_text, off_type=off_type)
     
     menu = admin_menu() if is_admin(user_id) else user_menu()
     
@@ -430,6 +481,12 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("End date cannot be before start date.")
         return LEAVE_END
     
+    # Check for conflicts with OFF dates or existing leaves
+    conflict_msg = check_date_conflict(user_id, start_date, end_date)
+    if conflict_msg:
+        await update.message.reply_text(conflict_msg + " Please choose different leave dates.")
+        return LEAVE_START
+    
     # Count weekdays only
     leave_days = sum(
         1
@@ -456,7 +513,7 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔵 Leave applied: {start} to {end} ({leave_days} days)", reply_markup=menu)
     
     context.user_data.pop("leave_start", None)
-    return ConversationHandler.END
+    return ConversationHandler.END 
 
 # ====================================
 # BUTTON HANDLER
@@ -536,6 +593,42 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state, start_date, end_date = "PRESENT", None, None
         status_text = "PRESENT"
         
+    # Prepare text for current/future OFFs taken
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT start_date, end_date, off_type FROM status WHERE telegram_id=? AND state='OFF'", (user_id,))
+    offs_taken = c.fetchall()
+    
+    off_text = ""
+    for off_start, off_end, off_type_db in offs_taken:
+        off_dt_start = datetime.datetime.strptime(off_start, "%Y-%m-%d").date()
+        off_dt_end = datetime.datetime.strptime(off_end, "%Y-%m-%d").date()
+        if off_dt_end >= today: # Show current/future OFF
+            if off_type_db == "AM":
+                off_type_display = "(AM OFF)"
+            elif off_type_db == "PM":
+                off_type_display = "(PM OFF)"
+            else:
+                off_type_display = "(FULL DAY)"
+                
+            if off_dt_start == off_dt_end:
+                off_text += f"\n🟡 Off Taken: {off_dt_start.strftime('%d %b')} {off_type_display}"
+            else:
+                off_text += f"\n🟡 Off Taken: {off_dt_start.strftime('%d %b')} - {off_dt_end.strftime('%d %b')} {off_type_display}"
+                
+    # Prepare text for current/future Leaves taken
+    c.execute("SELECT start_date, end_date FROM leaves WHERE telegram_id=?", (user_id,))
+    leaves_taken = c.fetchall()
+    
+    leave_text = ""
+    for leave_start, leave_end in leaves_taken:
+        leave_dt_start = datetime.datetime.strptime(leave_start, "%Y-%m-%d").date()
+        leave_dt_end = datetime.datetime.strptime(leave_end, "%Y-%m-%d").date()
+        if leave_dt_end >= today:
+            leave_text += f"\n🔵 Leaves Taken: {leave_dt_start.strftime('%d %b')} - {leave_dt_end.strftime('%d %b')}"
+    
+    conn.close()
+    
     # Daily summary
     daily_summary = ""
     if state == "OFF" and start_date and end_date:
@@ -555,11 +648,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🟡 Remaining OFFs: {off_counter}\n"
         f"🔵 Remaining LEAVEs: {leave_counter}"
     )
+    if off_text:
+        text += f"{off_text}"
+    if leave_text:
+        text += f"{leave_text}"
     if daily_summary:
-        text += f"{daily_summary}"
+        text += f"\n{daily_summary}"
         
     await update.message.reply_text(text)
-
 
 async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = get_all_users()
