@@ -54,7 +54,7 @@ def init_db():
         telegram_id INTEGER PRIMARY KEY,
         rank TEXT,
         name TEXT,
-        registered_at TEXT,
+        registered_at TEXT
     )
     """)
     
