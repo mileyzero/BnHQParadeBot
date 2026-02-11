@@ -475,6 +475,7 @@ app_flask = Flask(__name__)
 
 def main():
     init_db()
+    
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
@@ -527,24 +528,10 @@ def main():
         raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
     bot_app.bot.set_webhook(f"{RENDER_URL}/{BOT_TOKEN}")
     
-    import threading
-    def run_flask():
-        # Run Flask
-        PORT = int(os.environ.get("PORT", 10000))
-        app_flask.run(host="0.0.0.0", port=PORT)
-        
-    threading.Thread(target=run_flask).start()
+    # Run Flask app
+    PORT = int(os.environ.get("PORT", 10000))
+    print(f"Bot running with webhook on port {PORT}...")
+    app_flask.run(host="0.0.0.0, port=PORT)
     
-    # ----------------------------------------
-    # Run bot polling as fallback
-    # ----------------------------------------
-    print("Bot running... waiting for updates!")
-    asyncio.run(bot_app.initialize())
-    asyncio.run(bot_app.start())
-    asyncio.run(bot_app.updater.start_polling())
-    asyncio.run(bot_app.updater.idle())
-    
-
-
 if __name__ == "__main__":
     main()
