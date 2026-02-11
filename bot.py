@@ -52,14 +52,15 @@ def init_db():
         telegram_id INTEGER PRIMARY KEY,
         rank TEXT,
         name TEXT,
-        registered_at TEXT,
-        off_counter REAL DEFAULT 0
+        registered_at TEXT
     )
     """)
     
-    # Add leave_counter if not exists
+    # Add off_counter if not exists
     c.execute("PRAGMA table_info(users)")
     columns = [col[1] for col in c.fetchall()]
+    if "off_counter" not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN off_counter INTEGER DEFAULT 0")
     if "leave_counter" not in columns:
         c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
 
@@ -74,7 +75,7 @@ def init_db():
     )
     """)
 
-    # leaves table to store applied leave dates
+    # leaves table
     c.execute("""
     CREATE TABLE IF NOT EXISTS leaves (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -378,7 +379,7 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"🔵 Leave applied:\n{start} to {end}",
-        reply_markup=menu()
+        reply_markup=menu
     )
     
     context.user_data.pop("leave_start", None)
@@ -491,9 +492,6 @@ def main():
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
     
     bot_app.add_handler(CommandHandler("help", help_command))
-
-    bot_app.initialize()
-    bot_app.run_polling()
     
     # Uptime pinger
     @app_flask.get("/")
@@ -502,7 +500,7 @@ def main():
         
     # Webhook route for Telegram
     @app_flask.post(f"/{BOT_TOKEN}")
-    async def webhook():
+    def webhook():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
         await bot_app.process_update(update)
