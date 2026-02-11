@@ -491,8 +491,9 @@ def main():
     bot_app.add_handler(conv)
     bot_app.add_handler(leave_conv)
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
-    
     bot_app.add_handler(CommandHandler("help", help_command))
+    
+    bot_app.initialize()
     
     # Uptime pinger
     @app_flask.get("/")
@@ -501,10 +502,10 @@ def main():
         
     # Webhook route for Telegram
     @app_flask.post(f"/{BOT_TOKEN}")
-    async def webhook():
+    def webhook():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
-        await bot_app.process_update(update))
+        asyncio.create_task(bot_app.process_update(update))
         return "ok"
         
     # Set webhook
