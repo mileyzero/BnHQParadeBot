@@ -501,10 +501,10 @@ def main():
         
     # Webhook route for Telegram
     @app_flask.post(f"/{BOT_TOKEN}")
-    def webhook():
+    async def webhook():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
-        asyncio.create_task(bot_app.process_update(update))
+        await bot_app.process_update(update))
         return "ok"
         
     # Set webhook
