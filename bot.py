@@ -280,7 +280,7 @@ async def off_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return OFF_TYPE
     
-async def off_type_selected(update: Update, context: ContextTypes.DEFAULT.TYPE):
+async def off_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
