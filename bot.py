@@ -466,7 +466,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             daily_summary = "🟡 You are OFF today."
     elif state == "LEAVE" and start_date and end_date:
         start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
-        end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d".date()
+        end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
         if start_dt <= today <= end_dt and today.weekday() < 5: # Weekdays only
             daily_summary = "🔵 You are on LEAVE today."
     
