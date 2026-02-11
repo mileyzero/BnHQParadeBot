@@ -433,12 +433,53 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT state FROM status WHERE telegram_id=?", (update.effective_user.id,))
-    row = c.fetchone()
+    
+    # Get current status
+    c.execute("SELECT state, start_date, end_date FROM status WHERE telegram_id=?", (user_id,))
+    status_row = c.fetchone()
+    
+    # Get OFFs and LEAVEs
+    c.execute("SELECT off_counter, leave_counter FROM users WHERE telegram_id=?", (user_id,))
+    counters = c.fetchone()
     conn.close()
-    await update.message.reply_text(f"📌 Status: {row[0] if row else 'PRESENT'}")
+    
+    off_counter = counters[0] if counters else 0
+    leave_counter = counters[1] if counters else 0
+    
+    # Default status text
+    if status_row:
+        state, start_date, end_date = status_row
+        status_text = state
+    else:
+        state, start_date, end_date = "PRESENT", None, None
+        status_text = "PRESENT"
+        
+    # Daily summary
+    daily_summary = ""
+    if state == "OFF" and start_date and end_date:
+        start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+        if start_dt <= today <= end_dt:
+            daily_summary = "🟡 You are OFF today."
+    elif state == "LEAVE" and start_date and end_date:
+        start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d".date()
+        if start_dt <= today <= end_dt and today.weekday() < 5: # Weekdays only
+            daily_summary = "🔵 You are on LEAVE today."
+    
+    # Full status message
+    text = (
+        f"📌 Status: {status_text}\n"
+        f"🟡 Remaining OFFs: {off_counter}\n"
+        f"🔵 Remaining LEAVEs: {leave_counter}"
+    )
+    if daily_summary:
+        text += f"{daily_summary}"
+        
+    await update.message.reply_text(text)
 
 
 async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
