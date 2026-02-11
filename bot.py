@@ -602,7 +602,6 @@ def main():
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
             ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
-            OFF_TYPE: [CallbackQueryHandler(off_type_selected)],
         },
         fallbacks=[]
     )
@@ -621,7 +620,7 @@ def main():
     off_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🟡 Off$"), off_selection)],
         states={
-            OFF_TYPE: [CallbackQueryHandler(off_type_callback, pattern="^(AM|PM|FULL)$")],
+            OFF_TYPE: [CallbackQueryHandler(off_type_selected, pattern="^(AM|PM|FULL)$")],
             ASK_OFF_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, off_date_input)],
         },
         fallbacks=[],
