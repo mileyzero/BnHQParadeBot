@@ -84,7 +84,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 def get_user(user_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -92,7 +91,6 @@ def get_user(user_id):
     row = c.fetchone()
     conn.close()
     return row
-
 
 def save_user(user_id, rank, name, off_counter=0.0, leave_counter=0):
     conn = sqlite3.connect(DB_NAME)
@@ -134,7 +132,6 @@ def get_all_users():
     conn.close()
     return rows
 
-
 def add_leave(user_id, start_date, end_date, leave_days):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -142,10 +139,12 @@ def add_leave(user_id, start_date, end_date, leave_days):
         INSERT INTO leaves (telegram_id, start_date, end_date, created_at)
         VALUES (?, ?, ?, ?)
     """, (user_id, start_date, end_date, datetime.datetime.now().isoformat()))
+    conn.commit()
+    
+    # Deduct leave days from user's leave_counter
     c.execute("UPDATE users SET leave_counter = leave_counter - ? WHERE telegram_id=?", (leave_days, user_id))
     conn.commit()
     conn.close()
-
 
 def increment_off(user_id, amount):
     conn = sqlite3.connect(DB_NAME)
@@ -180,6 +179,12 @@ def admin_menu():
         resize_keyboard=True
     )
 
+def off_options_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("AM OFF (0.5)", callback_data="AM")],
+        [InlineKeyboardButton("PM OFF (0.5)", callback_data="PM")],
+        [InlineKeyboardButton("FULL DAY OFF (1), callback_data="FULL")]
+    ])
 
 def is_admin(user_id):
     return user_id in ADMIN_IDS
@@ -350,36 +355,60 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("End date cannot be before start date.")
         return LEAVE_END
     
-    # Calculate leave days excluding weekends
-    total_days = (end_date - start_date).days + 1
-    leave_days  = sum(1 for i in range(total_days) if (start_date + datetime.timedelta(days=i)).weekday() < 5)
+    # Count weekdays only
+    leave_days = sum(1 for i in range((end_date - start_date).days + 1)
+    if (start_date + datetime.timedelta(days=i)).weekday() < 5)
     
     # Check if user has enough leaves
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT leave_counter FROM users WHERE telegram_id=?", (user_id,))
-    leave_remaining = c.fetchone()[0]
+    remaining_leaves = c.fetchone()[0]
     conn.close()
     
-    if leave_days > leave_remaining:
-        await update.message.reply_text(f"❌ You only have {leave_remaining} leaves left. Cannot apply for {leave_days} days.")
+    if leave_days > remaining_leaves:
+        await update.message.reply_text(f"❌ You only have {remaining_leaves} LEAVEs remaining. Cannot apply {leave_days} days.")
         return ConversationHandler.END
-    
-    # Save leave record
-    add_leave(user_id, start, end)
-    
-    # Update current status
+        
+    # Save leave record and update status
+    add_leave(user_id, start, end, leave_days)
     set_status(user_id, "LEAVE", start, end)
     
     menu = admin_menu() if is_admin(user_id) else user_menu()
-    
-    await update.message.reply_text(
-        f"🔵 Leave applied:\n{start} to {end} ({leave_days} days)\nLeaves remaining: {leave_remaining - leave_days}",
-        reply_markup=menu
-    )
+    await update.message.reply_text(f"🔵 Leave applied: {start} to {end} ({leave_days} days)",
     
     context.user_data.pop("leave_start", None)
     return ConversationHandler.END
+    
+# ====================================
+# OFF TYPE CALLBACK
+# ====================================
+
+async def off_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+query = update.callback_query
+await query.answer()
+user_id = update.effective_user.id
+today = datetime.date.today()
+
+if query.data == "AM" or query.data == "PM":
+    off_amount = 0.5
+elif query.data == "FULL":
+    off_amount = 1
+else:
+    await query.edit_message_text("Invalid selection.")
+    return
+    
+# Update OFF counter
+conn = sqlite3.connect(DB_NAME)
+c = conn.cursor()
+c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (off_amount, user_id))
+conn.commit()
+conn.close()
+
+# Update status
+set_status(user_id, "OFF", today.isoformat(), today.isoformat())
+
+await query.edit_message_text(f"🟡 Marked {query.data} OFF. OFF counter updated by {off_amount}.")
 
 # ====================================
 # BUTTON HANDLER
@@ -399,7 +428,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🟢 Marked PRESENT.")
 
     elif text == "🟡 Off":
-        increment_off(user_id, today)
+        await update.message.reply_text("Select OFF type:", reply_markup=off_options_keyboard())
 
     elif text == "📌 My Status":
         await status(update, context)
@@ -559,6 +588,7 @@ def main():
     bot_app.add_handler(leave_conv)
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
     bot_app.add_handler(CommandHandler("help", help_command))
+    bot_app.add_handler(CallbackQueryHandler(off_type_callback, pattern="^(AM|PM|FULL)$"))
     
     bot_app.initialize()
     bot_app.run_polling()
