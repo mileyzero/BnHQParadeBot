@@ -1,4 +1,5 @@
 import os
+import asyncio
 import sqlite3
 import datetime
 import csv
@@ -503,7 +504,7 @@ def main():
     def webhook():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
-        await bot_app.process_update(update)
+        asyncio.create_task(bot_app.process_update(update))
         return "ok"
         
     # Set webhook
