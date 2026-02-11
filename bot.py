@@ -54,9 +54,15 @@ def init_db():
         name TEXT,
         registered_at TEXT,
         off_counter REAL DEFAULT 0,
-        leave_counter INTEGER DEFAULT 0
     )
     """)
+
+    # Add leave_counter if not exists
+    c.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in c.fetchall()]
+    if "leave_counter" not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
+
 
     # status table
     c.execute("""
