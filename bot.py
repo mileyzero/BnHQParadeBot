@@ -183,7 +183,7 @@ def off_options_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("AM OFF (0.5)", callback_data="AM")],
         [InlineKeyboardButton("PM OFF (0.5)", callback_data="PM")],
-        [InlineKeyboardButton("FULL DAY OFF (1), callback_data="FULL")]
+        [InlineKeyboardButton("FULL DAY OFF (1)", callback_data="FULL")]
     ])
 
 def is_admin(user_id):
