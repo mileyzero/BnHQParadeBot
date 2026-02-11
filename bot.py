@@ -390,7 +390,7 @@ async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start = update.message.text.strip()
     
     try:
-        start_date = datetime.datetime.strptime(start, "%Y-%m-%d")
+        start_date = datetime.datetime.strptime(start, "%Y-%m-%d").date()
     except:
         await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
         return LEAVE_START
