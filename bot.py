@@ -375,7 +375,7 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_status(user_id, "LEAVE", start, end)
     
     menu = admin_menu() if is_admin(user_id) else user_menu()
-    await update.message.reply_text(f"🔵 Leave applied: {start} to {end} ({leave_days} days)",
+    await update.message.reply_text(f"🔵 Leave applied: {start} to {end} ({leave_days} days)", reply_markup=menu)
     
     context.user_data.pop("leave_start", None)
     return ConversationHandler.END
