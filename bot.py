@@ -378,12 +378,13 @@ async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start = update.message.text.strip()
     
     try:
-        datetime.datetime.strptime(start, "%Y-%m-%d")
+        start_date = datetime.datetime.strptime(start, "%Y-%m-%d")
     except:
         await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
         return LEAVE_START
         
     today = datetime.date.today()
+    
     if start_date < today:
         await update.message.reply_text("❌ You cannot select a past date. Please choose today or a future date.")
         return LEAVE_START
@@ -418,8 +419,11 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return LEAVE_END
     
     # Count weekdays only
-    leave_days = sum(1 for i in range((end_date - start_date).days + 1)
-    if (start_date + datetime.timedelta(days=i)).weekday() < 5)
+    leave_days = sum(
+        1
+        for i in range((end_date - start_date).days + 1)
+        if (start_date + datetime.timedelta(days=i)).weekday() < 5
+    )
     
     # Check if user has enough leaves
     conn = sqlite3.connect(DB_NAME)
@@ -441,36 +445,6 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     context.user_data.pop("leave_start", None)
     return ConversationHandler.END
-    
-# ====================================
-# OFF TYPE CALLBACK
-# ====================================
-
-async def off_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    today = datetime.date.today()
-
-    if query.data == "AM" or query.data == "PM":
-        off_amount = 0.5
-    elif query.data == "FULL":
-        off_amount = 1
-    else:
-        await query.edit_message_text("Invalid selection.")
-        return
-    
-    # Update OFF counter
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE users SET off_counter = off_counter - ? WHERE telegram_id=?", (off_amount, user_id))
-    conn.commit()
-    conn.close()
-
-    # Update status
-    set_status(user_id, "OFF", today.isoformat(), today.isoformat())
-
-    await query.edit_message_text(f"🟡 Marked {query.data} OFF. OFF counter updated by {off_amount}.")
 
 # ====================================
 # BUTTON HANDLER
@@ -524,8 +498,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    today = datetime.date.today()
     
     # Get current status
     c.execute("SELECT state, start_date, end_date FROM status WHERE telegram_id=?", (user_id,))
@@ -629,7 +602,7 @@ def main():
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
             ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
-            OFF_TYPE: [CallbackQueryHandler(off_apply)],
+            OFF_TYPE: [CallbackQueryHandler(off_type_selected)],
         },
         fallbacks=[]
     )
@@ -649,7 +622,7 @@ def main():
         entry_points=[MessageHandler(filters.Regex("^🟡 Off$"), off_selection)],
         states={
             OFF_TYPE: [CallbackQueryHandler(off_type_callback, pattern="^(AM|PM|FULL)$")],
-            ASK_OFF_DATE: [MessageHandler(filter.TEXT & ~filters.COMMAND, off_date_input)],
+            ASK_OFF_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, off_date_input)],
         },
         fallbacks=[],
     )
@@ -657,8 +630,10 @@ def main():
     bot_app.add_handler(conv)
     bot_app.add_handler(leave_conv)
     bot_app.add_handler(off_conv)
+    
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
     bot_app.add_handler(CommandHandler("help", help_command))
+    bot_app.add_handler(CommandHandler("status", status))
     
     bot_app.initialize()
     bot_app.run_polling()
