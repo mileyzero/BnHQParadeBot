@@ -531,7 +531,7 @@ def main():
     # Run Flask app
     PORT = int(os.environ.get("PORT", 10000))
     print(f"Bot running with webhook on port {PORT}...")
-    app_flask.run(host="0.0.0.0, port=PORT)
+    app_flask.run(host="0.0.0.0", port=PORT)
     
 if __name__ == "__main__":
     main()
