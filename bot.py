@@ -53,7 +53,7 @@ def init_db():
         rank TEXT,
         name TEXT,
         registered_at TEXT,
-        off_counter REAL DEFAULT 0,
+        off_counter REAL DEFAULT 0
     )
     """)
 
@@ -62,6 +62,7 @@ def init_db():
     columns = [col[1] for col in c.fetchall()]
     if "leave_counter" not in columns:
         c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
+    
 
 
     # status table
