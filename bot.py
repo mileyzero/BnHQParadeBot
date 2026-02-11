@@ -1,4 +1,5 @@
 import os
+import asyncio
 import sqlite3
 import datetime
 import csv
@@ -42,30 +43,38 @@ RANKS = [
 # DATABASE
 # ====================================
 
+DB_NAME = "parade.db"
+
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
-    # users table with off/leave counters
+# ====================================
+# USERS TABLE
+# ====================================
+# Create table with only essential columns first
+
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
         rank TEXT,
         name TEXT,
-        registered_at TEXT,
-        off_counter REAL DEFAULT 0
+        registered_at TEXT
     )
     """)
 
-    # Add leave_counter if not exists
+    # Ensure 'off_counter' column exists
     c.execute("PRAGMA table_info(users)")
-    columns = [col[1] for col in c.fetchall()]
-    if "leave_counter" not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
+    existing_columns = [col[1] for col in c.fetchall()]
     
+    if "off_counter" not in existing_columns:
+        c.execute("ALTER TABLE users ADD COLUMN off_counter REAL DEFAULT 0")
+    if "leave_counter" not in existing_columns:
+        c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
 
-
-    # status table
+    # =====================================
+    # STATUS TABLE
+    # =====================================
     c.execute("""
     CREATE TABLE IF NOT EXISTS status (
         telegram_id INTEGER PRIMARY KEY,
@@ -76,7 +85,9 @@ def init_db():
     )
     """)
 
-    # leaves table to store applied leave dates
+    # =========================================
+    # LEAVES TABLE
+    # =========================================
     c.execute("""
     CREATE TABLE IF NOT EXISTS leaves (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -491,11 +502,11 @@ def main():
     bot_app.add_handler(conv)
     bot_app.add_handler(leave_conv)
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
-    
     bot_app.add_handler(CommandHandler("help", help_command))
-
-    bot_app.initialize()
-    bot_app.run_polling()
+    
+    # =======================================
+    # FLASK ROUTES
+    # =======================================
     
     # Uptime pinger
     @app_flask.get("/")
@@ -516,9 +527,23 @@ def main():
         raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
     bot_app.bot.set_webhook(f"{RENDER_URL}/{BOT_TOKEN}")
     
-    # Run Flask
-    PORT = int(os.environ.get("PORT", 10000))
-    app_flask.run(host="0.0.0.0", port=PORT)
+    import threading
+    def run_flask():
+        # Run Flask
+        PORT = int(os.environ.get("PORT", 10000))
+        app_flask.run(host="0.0.0.0", port=PORT)
+        
+    threading.Thread(target=run_flask).start()
+    
+    # ----------------------------------------
+    # Run bot polling as fallback
+    # ----------------------------------------
+    print("Bot running... waiting for updates!")
+    asyncio.run(bot_app.initialize())
+    asyncio.run(bot_app.start())
+    asyncio.run(bot_app.updater.start_polling())
+    asyncio.run(bot_app.updater.idle())
+    
 
 
 if __name__ == "__main__":
