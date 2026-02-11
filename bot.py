@@ -500,6 +500,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     today = datetime.date.today()
     
+    # Open DB
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    
     # Get current status
     c.execute("SELECT state, start_date, end_date FROM status WHERE telegram_id=?", (user_id,))
     status_row = c.fetchone()
