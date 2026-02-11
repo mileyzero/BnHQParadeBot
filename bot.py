@@ -30,7 +30,7 @@ if not BOT_TOKEN:
 ADMIN_IDS = [483448454]
 DB_NAME = "parade.db"
 
-ASK_RANK, ASK_NAME, ASK_OFFS, ASK_LEAVES, LEAVE_START, LEAVE_END = range(6)
+ASK_RANK, ASK_NAME, ASK_OFFS, ASK_LEAVES, LEAVE_START, LEAVE_END, OFF_SELECT = range(7)
 
 RANKS = [
     "REC", "PTE", "LCP", "CPL", "CFC",
@@ -53,17 +53,11 @@ def init_db():
         telegram_id INTEGER PRIMARY KEY,
         rank TEXT,
         name TEXT,
-        registered_at TEXT
+        registered_at TEXT,
+        off_counter REAL DEFAULT 0,
+        leave_counter INTEGER DEFAULT 0
     )
     """)
-    
-    # Add off_counter if not exists
-    c.execute("PRAGMA table_info(users)")
-    columns = [col[1] for col in c.fetchall()]
-    if "off_counter" not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN off_counter INTEGER DEFAULT 0")
-    if "leave_counter" not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN leave_counter INTEGER DEFAULT 0")
 
     # status table
     c.execute("""
@@ -141,36 +135,22 @@ def get_all_users():
     return rows
 
 
-def add_leave(user_id, start_date, end_date):
+def add_leave(user_id, start_date, end_date, leave_days):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
         INSERT INTO leaves (telegram_id, start_date, end_date, created_at)
         VALUES (?, ?, ?, ?)
     """, (user_id, start_date, end_date, datetime.datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
-    # increment leave counter
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE users SET leave_counter = leave_counter + 1 WHERE telegram_id=?", (user_id,))
+    c.execute("UPDATE users SET leave_counter = leave_counter - ? WHERE telegram_id=?", (leave_days, user_id))
     conn.commit()
     conn.close()
 
 
-def increment_off(user_id, date):
-    # Friday 0.5, Saturday 1.5, Sunday 1
-    weekday = date.weekday()
-    add = 0
-    if weekday == 4:  # Friday
-        add = 0.5
-    elif weekday == 5:  # Saturday
-        add = 1.5
-    elif weekday == 6:  # Sunday
-        add = 1
+def increment_off(user_id, amount):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (add, user_id))
+    c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (amount, user_id))
     conn.commit()
     conn.close()
 
@@ -274,8 +254,8 @@ async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rank = context.user_data["reg_rank"]
     offs = context.user_data["offs"]
 
-    save_user(user_id, rank, name, offs, leaves)
-    set_status(user_id, "PRESENT")
+    save_user(update.effective_user.id, rank, name, offs, leaves)
+    set_status(update.effective_user.id, "PRESENT")
 
     menu = admin_menu() if is_admin(user_id) else user_menu()
     
@@ -285,55 +265,55 @@ async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-
 # ====================================
-# BUTTON HANDLER
+# OFF HANDLER
 # ====================================
 
-async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    user_id = update.effective_user.id
+async def off_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("AM OFF (0.5)", callback_data="AM")],
+        [InlineKeyboardButton("PM OFF (0.5)", callback_data="PM")],
+        [InlineKeyboardButton("FULL DAY OFF(1)", callback_data="FULL")]
+    ]
+    await update.message.reply_text("Select OFF type:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return OFF_SELECT
+    
+async def off_apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
     today = datetime.date.today()
-
-    if not get_user(user_id):
-        await update.message.reply_text("Please register with /start first.")
-        return
-
-    if text == "🟢 Present":
-        set_status(user_id, "PRESENT")
-        await update.message.reply_text("🟢 Marked PRESENT.")
-
-    elif text == "🟡 Off":
-        set_status(user_id, "OFF", today.isoformat(), today.isoformat())
-        increment_off(user_id, today)
-        await update.message.reply_text("🟡 Marked OFF. Counter updated based on day.")
-
-    elif text == "📌 My Status":
-        await status(update, context)
-
-    elif text == "❓ Help":
-        await help_command(update, context)
-
-    elif is_admin(user_id) and text == "📋 Parade State":
-        await parade(update, context)
-
-    elif is_admin(user_id) and text == "📊 Strength":
-        await strength(update, context)
-
-    elif is_admin(user_id) and text == "🔄 Reset Parade":
-        await reset_db(update, context)
-
-    elif is_admin(user_id) and text == "📤 Export CSV":
-        await export_csv(update, context)
-
+    
+    off_map = {"AM":0.5, "PM":0.5, "FULL":1.0}
+    off_amount = off_map.get(query.data, 0)
+    
+    increment_off(user_id, off_amount)
+    set_status(user_id, "OFF", today.isoformat(), today.isoformat())
+    
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT off_counter FROM users WHERE telegram_id=?", (user_id,))
+    off_total = c.fetchone()[0]
+    conn.close()
+    
+    await query.edit_message_text(f"🟡 Marked OFF ({query.data}). Total OFFs: {off_total}")
     return ConversationHandler.END
-
-
+    
 # ====================================
 # LEAVE HANDLER
 # ====================================
 
 async def start_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT leave_counter FROM users WHERE telegram_id=?", (user_id,))
+    leaves = c.fetchone()[0]
+    conn.close()
+    if leaves <= 0:
+        await update.message.reply_text("❌ You have no remaining leaves.")
+        return ConversationHandler.END
+    
     await update.message.reply_text("Enter start date of leave (YYYY-MM-DD):")
     return LEAVE_START
     
@@ -360,8 +340,8 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
         
     try:
-        start_date = datetime.datetime.strptime(start, "%Y-%m-%d")
-        end_date = datetime.datetime.strptime(end, "%Y-%m-%d")
+        start_date = datetime.datetime.strptime(start, "%Y-%m-%d").date()
+        end_date = datetime.datetime.strptime(end, "%Y-%m-%d").date()
     except:
         await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
         return LEAVE_END
@@ -369,6 +349,21 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if end_date < start_date:
         await update.message.reply_text("End date cannot be before start date.")
         return LEAVE_END
+    
+    # Calculate leave days excluding weekends
+    total_days = (end_date - start_date).days + 1
+    leave_days  = sum(1 for i in range(total_days) if (start_date + datetime.timedelta(days=i)).weekday() < 5)
+    
+    # Check if user has enough leaves
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT leave_counter FROM users WHERE telegram_id=?", (user_id,))
+    leave_remaining = c.fetchone()[0]
+    conn.close()
+    
+    if leave_days > leave_remaining:
+        await update.message.reply_text(f"❌ You only have {leave_remaining} leaves left. Cannot apply for {leave_days} days.")
+        return ConversationHandler.END
     
     # Save leave record
     add_leave(user_id, start, end)
@@ -379,16 +374,54 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu = admin_menu() if is_admin(user_id) else user_menu()
     
     await update.message.reply_text(
-        f"🔵 Leave applied:\n{start} to {end}",
+        f"🔵 Leave applied:\n{start} to {end} ({leave_days} days)\nLeaves remaining: {leave_remaining - leave_days}",
         reply_markup=menu
     )
     
     context.user_data.pop("leave_start", None)
-    
     return ConversationHandler.END
+
+# ====================================
+# BUTTON HANDLER
+# ====================================
+
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_id = update.effective_user.id
+    today = datetime.date.today()
+
+    if not get_user(user_id):
+        await update.message.reply_text("Please register with /start first.")
+        return
+
+    if text == "🟢 Present":
+        set_status(user_id, "PRESENT")
+        await update.message.reply_text("🟢 Marked PRESENT.")
+
+    elif text == "🟡 Off":
+        increment_off(user_id, today)
+
+    elif text == "📌 My Status":
+        await status(update, context)
+
+    elif text == "❓ Help":
+        await help_command(update, context)
+
+    elif is_admin(user_id) and text == "📋 Parade State":
+        await parade(update, context)
+
+    elif is_admin(user_id) and text == "📊 Strength":
+        await strength(update, context)
+
+    elif is_admin(user_id) and text == "🔄 Reset Parade":
+        await reset_db(update, context)
+
+    elif is_admin(user_id) and text == "📤 Export CSV":
+        await export_csv(update, context)
+
+    return ConversationHandler.END
+
     
-
-
 # ====================================
 # COMMANDS
 # ====================================
@@ -409,15 +442,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("""
-        SELECT users.rank, users.name, users.off_counter, users.leave_counter, status.state
-        FROM users
-        LEFT JOIN status ON users.telegram_id = status.telegram_id
-    """)
-    users = c.fetchall()
-
+    users = get_all_users()
     text = "📋 PARADE STATE\n\n"
     for rank, name, off_counter, leave_counter, state in users:
         leave_text = f"LEAVEs: {leave_counter}"
@@ -473,6 +498,7 @@ def main():
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
             ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
+            OFF_SELECT: [CallbackQueryHandler(off_apply)],
         },
         fallbacks=[]
     )
@@ -496,29 +522,5 @@ def main():
     bot_app.initialize()
     bot_app.run_polling()
     
-    # Uptime pinger
-    @app_flask.get("/")
-    def health():
-        return "Bot is running"
-        
-    # Webhook route for Telegram
-    @app_flask.post(f"/{BOT_TOKEN}")
-    def webhook():
-        data = request.get_json(force=True)
-        update = Update.de_json(data, bot_app.bot)
-        asyncio.create_task(bot_app.process_update(update))
-        return "ok"
-        
-    # Set webhook
-    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
-    if not RENDER_URL:
-        raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
-    bot_app.bot.set_webhook(f"{RENDER_URL}/{BOT_TOKEN}")
-    
-    # Run Flask
-    PORT = int(os.environ.get("PORT", 10000))
-    app_flask.run(host="0.0.0.0", port=PORT)
-
-
 if __name__ == "__main__":
     main()
