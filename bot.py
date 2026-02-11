@@ -509,6 +509,11 @@ def main():
     # FLASK ROUTES
     # =======================================
     
+    # Set webhook
+    webhook_url = f"{RENDER_URL}/{BOT_TOKEN}"
+    bot_app.bot.set_webhook(webhook_url)
+    print(f"Webhook set to {webhook_url}")
+    
     # Uptime pinger
     @app_flask.get("/")
     def health():
@@ -516,17 +521,12 @@ def main():
         
     # Webhook route for Telegram
     @app_flask.post(f"/{BOT_TOKEN}")
-    async def webhook():
+    def webhook():
         data = request.get_json(force=True)
         update = Update.de_json(data, bot_app.bot)
-        await bot_app.process_update(update)
+        # Run async bot handler
+        asyncio.run(bot_app.process_update(update))
         return "ok"
-        
-    # Set webhook
-    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
-    if not RENDER_URL:
-        raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
-    bot_app.bot.set_webhook(f"{RENDER_URL}/{BOT_TOKEN}")
     
     # Run Flask app
     PORT = int(os.environ.get("PORT", 10000))
