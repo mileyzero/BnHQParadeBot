@@ -82,11 +82,6 @@ def init_db():
     )
     """)
     
-    try:
-        c.execute("ALTER TABLE status ADD COLUMN off_type TEXT DEFAULT NULL")
-    except sqlite3.OperationalError:
-        pass
-
     # leaves table
     c.execute("""
     CREATE TABLE IF NOT EXISTS leaves (
@@ -125,7 +120,7 @@ def set_status(user_id, state, start_date=None, end_date=None, off_type=None):
     c = conn.cursor()
     c.execute("""
         INSERT OR REPLACE INTO status
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
     """, (
         user_id,
         state,
@@ -196,8 +191,8 @@ def check_date_conflict(user_id, new_start: datetime.date, new_end: datetime.dat
             return f"❌ Conflict with LEAVE from {leave_start} to {leave_end}."
     
     # Check existing offs
-    c.execute("SELECT start_date, end_date FROM leaves WHERE telegram_id=?", (user_id,))
-    leaves = c.fetchall()
+    c.execute("SELECT start_date, end_date FROM status WHERE telegram_id=? AND state='OFF'", (user_id,))
+    offs = c.fetchall()
     for off_start, off_end in offs:
         off_start_dt = datetime.datetime.strptime(off_start, "%Y-%m-%d").date()
         off_end_dt = datetime.datetime.strptime(off_end, "%Y-%m-%d").date()
@@ -380,7 +375,8 @@ async def off_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT off_counter FROM users WHERE telegram_id=?", (user_id,))
-    remaining_off = c.fetchone()[0]
+    row = c.fetchone()
+    remaining_off = row[0] if row else 0
     
     if off_amount > remaining_off:
         conn.close()
@@ -407,6 +403,13 @@ async def off_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_status(user_id, "OFF", date_text, date_text, off_type=off_type)
     
     menu = admin_menu() if is_admin(user_id) else user_menu()
+    
+    # Display message with type
+    off_display = {
+        "AM": "AM OFF",
+        "PM" : "PM OFF",
+        "FULL" : "FULL DAY"
+    }.get(off_type, "FULL DAY")
     
     await update.message.reply_text(
         f"🟡 OFF applied on {date_text}\n"
@@ -593,7 +596,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state, start_date, end_date = "PRESENT", None, None
         status_text = "PRESENT"
         
-    # Prepare text for current/future OFFs taken
+    # --- OFFs taken ---
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT start_date, end_date, off_type FROM status WHERE telegram_id=? AND state='OFF'", (user_id,))
@@ -616,7 +619,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 off_text += f"\n🟡 Off Taken: {off_dt_start.strftime('%d %b')} - {off_dt_end.strftime('%d %b')} {off_type_display}"
                 
-    # Prepare text for current/future Leaves taken
+    # --- LEAVEs taken ---
     c.execute("SELECT start_date, end_date FROM leaves WHERE telegram_id=?", (user_id,))
     leaves_taken = c.fetchall()
     
@@ -624,8 +627,12 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for leave_start, leave_end in leaves_taken:
         leave_dt_start = datetime.datetime.strptime(leave_start, "%Y-%m-%d").date()
         leave_dt_end = datetime.datetime.strptime(leave_end, "%Y-%m-%d").date()
+        
         if leave_dt_end >= today:
-            leave_text += f"\n🔵 Leaves Taken: {leave_dt_start.strftime('%d %b')} - {leave_dt_end.strftime('%d %b')}"
+            if leave_dt_start == leave_dt_end:
+                leave_text += f"\n🔵 Leave Taken: {leave_dt_start.strftime('%d %b')}"
+            else:
+                leave_text += f"\n🔵 Leaves Taken: {leave_dt_start.strftime('%d %b')} - {leave_dt_end.strftime('%d %b')}"
     
     conn.close()
     
@@ -698,10 +705,6 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====================================
 # MAIN
 # ====================================
-
-from flask import Flask, request
-
-app_flask = Flask(__name__)
 
 def main():
     init_db()
