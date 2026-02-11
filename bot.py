@@ -77,10 +77,15 @@ def init_db():
         state TEXT,
         start_date TEXT,
         end_date TEXT,
-        updated_at TEXT,
-        off_type TEXT DEFAULT NULL
+        updated_at TEXT
     )
     """)
+    
+    # Add off_type if missing
+    try:
+        c.execute("ALTER TABLE status ADD COLUMN off_type TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass
     
     # leaves table
     c.execute("""
