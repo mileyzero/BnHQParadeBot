@@ -327,7 +327,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====================================
 
 async def start_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Enter end date of leave (YYYY-MM-DD):")
+    await update.message.reply_text("Enter start date of leave (YYYY-MM-DD):")
     return LEAVE_START
     
 async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -451,9 +451,13 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 # ====================================
 
+from flask import Flask, request
+
+app_flask = Flask(__name__)
+
 def main():
     init_db()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -483,8 +487,31 @@ def main():
     
     app.add_handler(CommandHandler("help", help_command))
 
-    print("Bot running...")
-    app.run_polling()
+    bot_app.initialize()
+    bot_app.run_polling()
+    
+    # Uptime pinger
+    @app_flask.get("/")
+    def health():
+        return "Bot is running"
+        
+    # Webhook route for Telegram
+    @app_flask.post(f"/{BOT_TOKEN}")
+    async def webhook():
+        data = request.get_json(force=True)
+        update = Update.de_json(data, bot_app.bot)
+        await bot_app.process_update(update)
+        return "ok"
+        
+    # Set webhook
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+    if not RENDER_URL:
+        raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
+    bot_app.bot.set_webhook(f"{RENDER_URL}/{BOT_TOKEN}")
+    
+    # Run Flask
+    PORT = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=PORT)
 
 
 if __name__ == "__main__":
