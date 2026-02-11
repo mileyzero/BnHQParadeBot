@@ -385,30 +385,30 @@ async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====================================
 
 async def off_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-query = update.callback_query
-await query.answer()
-user_id = update.effective_user.id
-today = datetime.date.today()
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    today = datetime.date.today()
 
-if query.data == "AM" or query.data == "PM":
-    off_amount = 0.5
-elif query.data == "FULL":
-    off_amount = 1
-else:
-    await query.edit_message_text("Invalid selection.")
-    return
+    if query.data == "AM" or query.data == "PM":
+        off_amount = 0.5
+    elif query.data == "FULL":
+        off_amount = 1
+    else:
+        await query.edit_message_text("Invalid selection.")
+        return
     
-# Update OFF counter
-conn = sqlite3.connect(DB_NAME)
-c = conn.cursor()
-c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (off_amount, user_id))
-conn.commit()
-conn.close()
+    # Update OFF counter
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (off_amount, user_id))
+    conn.commit()
+    conn.close()
 
-# Update status
-set_status(user_id, "OFF", today.isoformat(), today.isoformat())
+    # Update status
+    set_status(user_id, "OFF", today.isoformat(), today.isoformat())
 
-await query.edit_message_text(f"🟡 Marked {query.data} OFF. OFF counter updated by {off_amount}.")
+    await query.edit_message_text(f"🟡 Marked {query.data} OFF. OFF counter updated by {off_amount}.")
 
 # ====================================
 # BUTTON HANDLER
