@@ -26,6 +26,10 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set!")
+    
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+if not RENDER_URL:
+    raise ValueError("RENDER_EXTERNAL_URL environment variable not set!")
 
 ADMIN_IDS = [483448454]
 DB_NAME = "parade.db"
