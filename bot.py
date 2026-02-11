@@ -104,7 +104,6 @@ def save_user(user_id, rank, name, off_counter=0.0, leave_counter=0):
     conn.commit()
     conn.close()
 
-
 def set_status(user_id, state, start_date=None, end_date=None):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -272,6 +271,7 @@ async def get_leaves(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_status(user_id, "PRESENT")
 
     menu = admin_menu() if is_admin(user_id) else user_menu()
+    
     await update.message.reply_text(
         f"✅ Registration complete!\n{rank} {name}\nStatus: PRESENT\nOFFs: {offs}, LEAVEs: {leaves}",
         reply_markup=menu
@@ -301,12 +301,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         increment_off(user_id, today)
         await update.message.reply_text("🟡 Marked OFF. Counter updated based on day.")
 
-    elif text == "🔵 Leave":
-        await update.message.reply_text(
-            "Enter start date of leave (YYYY-MM-DD):"
-        )
-        return LEAVE_START
-
     elif text == "📌 My Status":
         await status(update, context)
 
@@ -332,27 +326,60 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # LEAVE HANDLER
 # ====================================
 
-async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["leave_start"] = update.message.text
+async def start_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Enter end date of leave (YYYY-MM-DD):")
-    return LEAVE_END
-
-
-async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    start = context.user_data["leave_start"]
-    end = update.message.text
+    return LEAVE_START
+    
+async def leave_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    start = update.message.text.strip()
+    
     try:
         datetime.datetime.strptime(start, "%Y-%m-%d")
-        datetime.datetime.strptime(end, "%Y-%m-%d")
     except:
         await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
         return LEAVE_START
+        
+    context.user_data["leave_start"] = start
+    await update.message.reply_text("Enter end date of leave (YYYY-MM-DD):")
+    return LEAVE_END
 
+async def leave_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    end = update.message.text.strip()
+    start = context.user_data.get("leave_start")
+    
+    if not start:
+        await update.message.reply_text("Something went wrong. Please press 🔵 Leave again.")
+        return ConversationHandler.END
+        
+    try:
+        start_date = datetime.datetime.strptime(start, "%Y-%m-%d")
+        end_date = datetime.datetime.strptime(end, "%Y-%m-%d")
+    except:
+        await update.message.reply_text("Invalid date format. Use YYYY-MM-DD.")
+        return LEAVE_END
+        
+    if end_date < start_date:
+        await update.message.reply_text("End date cannot be before start date.")
+        return LEAVE_END
+    
+    # Save leave record
     add_leave(user_id, start, end)
+    
+    # Update current status
     set_status(user_id, "LEAVE", start, end)
-    await update.message.reply_text(f"🔵 Leave applied: {start} to {end}")
+    
+    menu = admin_menu() if is_admin(user_id) else user_menu()
+    
+    await update.message.reply_text(
+        f"🔵 Leave applied:\n{start} to {end}",
+        reply_markup=menu()
+    )
+    
+    context.user_data.pop("leave_start", None)
+    
     return ConversationHandler.END
+    
 
 
 # ====================================
@@ -435,14 +462,25 @@ def main():
             ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             ASK_OFFS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_offs)],
             ASK_LEAVES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_leaves)],
-            LEAVE_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_start)],
-            LEAVE_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_end)],
         },
         fallbacks=[]
     )
 
+    leave_conv = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex("^🔵 Leave$"), start_leave)
+        ],
+        states={
+            LEAVE_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_start)],
+            LEAVE_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, leave_end)],
+        },
+        fallbacks=[],
+    )
+    
     app.add_handler(conv)
+    app.add_handler(leave_conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
+    
     app.add_handler(CommandHandler("help", help_command))
 
     print("Bot running...")
