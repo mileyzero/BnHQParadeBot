@@ -170,6 +170,39 @@ def increment_off(user_id, amount):
     c.execute("UPDATE users SET off_counter = off_counter + ? WHERE telegram_id=?", (amount, user_id))
     conn.commit()
     conn.close()
+    
+# =====================================   
+# HELPER FUNCTIONS
+# =====================================
+
+def get_today_status_display(user_id):
+    conn = sqlite3.connect("parade.db")
+    c = conn.cursor()
+    
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    
+    c.execute("""
+        SELECT state, start_date, end_date, off_type
+        FROM status
+        WHERE telegram_id=?
+    """, (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    
+    for state, start_date, end_date, off_type in rows:
+        if start_date and end_date:
+            if start_date <= today <= end_date:
+                if state == "OFF":
+                    if off_type == "AM":
+                        return "🟡 AM OFF"
+                    elif off_type == "PM":
+                        return "🟡 PM OFF"
+                    else:
+                        return ""
+                        
+                elif state == "LEAVE":
+                    return "🔵 LEAVE"
+    return "🟢 PRESENT"
 
 # ====================================
 # DATE CONFLICT CHECKER
@@ -670,25 +703,50 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 async def parade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    users = get_all_users()
-    text = "📋 PARADE STATE\n\n"
-    for rank, name, off_counter, leave_counter, state in users:
-        leave_text = f"LEAVEs: {leave_counter}"
-        if state == "OFF":
-            text += f"🟡 {rank} {name} - OFFs: {off_counter}\n"
-        elif state == "LEAVE":
-            text += f"🔵 {rank} {name} - {leave_text}\n"
-        else:
-            text += f"🟢 {rank} {name}\n"
+    user_id = update.effective_user.id
+    
+    conn = sqlite3.connect("parade.db")
+    c = conn.cursor()
+    
+    c.execute("SELECT rank, name FROM users WHERE telegram_id=?", (user_id,))
+    user = c.fetchone()
+    conn.close()
+    
+    if not user:
+        await update.message.reply_text("You are not registered.")
+        return
+    
+    rank, name = user
+    availability = get_today_status_display(user_id)
+    
+    text = (
+        f"📋 PARADE STATE\n\n"
+        f"Rank: {rank}\n"
+        f"Name: {name}\n"
+        f"Availability Today: {availability}"
+    )
+    
     await update.message.reply_text(text)
 
 
 async def strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    users = get_all_users()
-    count = {}
-    for rank, _, _, _, _ in users:
-        count[rank] = count.get(rank, 0) + 1
-    text = "📊 STRENGTH\n\n" + "\n".join(f"{r}: {c}" for r, c in count.items())
+    conn = sqlite3.connect("parade.db")
+    c = conn.cursor()
+    
+    c.execute("SELECT telegram_id, rank, name FROM users")
+    users = c.fetchall()
+    conn.close()
+    
+    if not users:
+        await update.message.reply_text("No users registered.")
+        return
+        
+    text = "📊 Bn HQ UNIT STRENGTH\n\n"
+    
+    for telegram_id, rank, name in users:
+        availability = get_today_status_display(telegram_id)
+        text += f"{rank} {name} — {availability}\n"
+        
     await update.message.reply_text(text)
 
 
