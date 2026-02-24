@@ -830,7 +830,6 @@ def main():
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(CommandHandler("status", status))
     
-    bot_app.initialize()
     bot_app.run_polling()
     
 if __name__ == "__main__":
