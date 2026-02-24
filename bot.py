@@ -793,8 +793,6 @@ def main():
     
     init_db()
     
-    Thread(target=run_web).start()
-    
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
