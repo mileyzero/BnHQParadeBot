@@ -772,19 +772,25 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app_flask = Flask(__name__)
 
+bot_app = None
+
 @app_flask.route("/")
 def home():
     return "Bot is alive!", 200
 
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app_flask.run(host="0.0.0.0", port=port)
+@app_flask.route("/webhook", methods=["POST"])
+async def webhook():
+    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    await bot_app.process_update(update)
+    return "OK", 200
 
 # ====================================
 # MAIN
 # ====================================
 
 def main():
+    global bot_app
+    
     init_db()
     
     Thread(target=run_web).start()
@@ -830,7 +836,16 @@ def main():
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(CommandHandler("status", status))
     
-    bot_app.run_polling()
+    bot_app.initialize()
+    
+    render_url = os.environ.get("https://bnhqparadebot.onrender.com")
+    webhook_url = f"{render_url}/webhook"
+    bot_app.bot.set_webhook(webhook_url)
+    
+    print(f"Webhook set to: {webhook_url}")
+    
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
     
 if __name__ == "__main__":
     main()
