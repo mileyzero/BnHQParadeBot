@@ -834,7 +834,8 @@ def main():
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(CommandHandler("status", status))
     
-    bot_app.initialize()
+    await bot_app.initialize()
+    await bot_app.start()
     
     render_url = os.environ.get("https://bnhqparadebot.onrender.com")
     webhook_url = f"{render_url}/webhook"
