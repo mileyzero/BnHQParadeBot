@@ -1,4 +1,5 @@
 import os
+import asyncio
 import sqlite3
 import datetime
 import csv
@@ -839,7 +840,8 @@ def main():
     
     render_url = os.environ.get("https://bnhqparadebot.onrender.com")
     webhook_url = f"{render_url}/webhook"
-    bot_app.bot.set_webhook(webhook_url)
+    
+    await bot_app.bot.set_webhook(webhook_url)
     
     print(f"Webhook set to: {webhook_url}")
     
@@ -847,4 +849,4 @@ def main():
     app_flask.run(host="0.0.0.0", port=port)
     
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
