@@ -789,7 +789,7 @@ async def webhook():
 # MAIN
 # ====================================
 
-def main():
+async def main():
     global bot_app
     
     init_db()
