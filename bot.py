@@ -2,6 +2,8 @@ import os
 import sqlite3
 import datetime
 import csv
+from flask import Flask
+from threading import Thread
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -764,6 +766,19 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         writer.writerows(users)
     await update.message.reply_document(open("parade.csv", "rb"))
 
+# ====================================
+# FLASK KEEP-ALIVE SERVER
+# ====================================
+
+app_flask = Flask(__name__)
+
+@app_flask.route("/")
+def home():
+    return "Bot is alive!", 200
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
 
 # ====================================
 # MAIN
@@ -771,6 +786,9 @@ async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init_db()
+    
+    Thread(target=run_web).start()
+    
     bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
